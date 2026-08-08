@@ -12,3 +12,170 @@ generator client {
 datasource db {
   provider = "postgresql"
 }
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum UserRole {
+  analyst
+  lead
+
+  @@map("user_role")
+}
+
+// Shared severity scale for alerts.severity and cases.severity (docs/ARCHITECTURE.md
+// documents identical value sets for both columns).
+enum Severity {
+  low
+  medium
+  high
+  critical
+
+  @@map("severity")
+}
+
+enum AlertStatus {
+  new
+  linked
+  dismissed
+
+  @@map("alert_status")
+}
+
+enum CaseStatus {
+  OPEN
+  TRIAGING
+  INVESTIGATING
+  ESCALATED
+  MITIGATING
+  VERIFYING
+  RESOLVED
+
+  @@map("case_status")
+}
+
+enum TimelineEventType {
+  note
+  status_change
+  evidence_added
+  comment
+  alert_linked
+
+  @@map("timeline_event_type")
+}
+
+enum EvidenceType {
+  LOG
+  SCREENSHOT
+  FILE
+  URL
+  COMMAND_OUTPUT
+  OTHER
+
+  @@map("evidence_type")
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  email        String   @unique
+  passwordHash String   @map("password_hash")
+  name         String
+  role         UserRole
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  assignedCases          Case[]
+  authoredTimelineEvents TimelineEvent[]
+  authoredEvidence       Evidence[]
+
+  @@map("users")
+}
+
+model Alert {
+  id            String      @id @default(uuid()) @db.Uuid
+  source        String
+  summary       String
+  rawPayload    Json?       @map("raw_payload")
+  severity      Severity
+  status        AlertStatus @default(new)
+  dismissReason String?     @map("dismiss_reason")
+  createdAt     DateTime    @default(now()) @map("created_at")
+
+  caseAlert CaseAlert?
+
+  @@map("alerts")
+}
+
+model Case {
+  id                String     @id @default(uuid()) @db.Uuid
+  title             String
+  status            CaseStatus @default(OPEN)
+  severity          Severity
+  assigneeId        String     @map("assignee_id") @db.Uuid
+  resolutionSummary String?    @map("resolution_summary")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  assignee       User            @relation(fields: [assigneeId], references: [id])
+  caseAlerts     CaseAlert[]
+  timelineEvents TimelineEvent[]
+  evidence       Evidence[]
+
+  @@index([status])
+  @@index([assigneeId])
+  @@map("cases")
+}
+
+model CaseAlert {
+  id       String   @id @default(uuid()) @db.Uuid
+  caseId   String   @map("case_id") @db.Uuid
+  alertId  String   @unique @map("alert_id") @db.Uuid
+  linkedAt DateTime @default(now()) @map("linked_at")
+
+  case  Case  @relation(fields: [caseId], references: [id])
+  alert Alert @relation(fields: [alertId], references: [id])
+
+  @@index([caseId])
+  @@map("case_alerts")
+}
+
+model TimelineEvent {
+  id        String            @id @default(uuid()) @db.Uuid
+  caseId    String            @map("case_id") @db.Uuid
+  type      TimelineEventType
+  authorId  String            @map("author_id") @db.Uuid
+  content   Json
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  case     Case       @relation(fields: [caseId], references: [id])
+  author   User       @relation(fields: [authorId], references: [id])
+  evidence Evidence[]
+
+  @@index([caseId, createdAt])
+  @@map("timeline_events")
+}
+
+model Evidence {
+  id              String       @id @default(uuid()) @db.Uuid
+  caseId          String       @map("case_id") @db.Uuid
+  timelineEventId String       @map("timeline_event_id") @db.Uuid
+  type            EvidenceType
+  source          String
+  content         String
+  timestamp       DateTime
+  authorId        String       @map("author_id") @db.Uuid
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  case          Case          @relation(fields: [caseId], references: [id])
+  timelineEvent TimelineEvent @relation(fields: [timelineEventId], references: [id])
+  author        User          @relation(fields: [authorId], references: [id])
+
+  @@index([caseId])
+  @@index([timelineEventId])
+  @@map("evidence")
+}
