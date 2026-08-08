@@ -1,6 +1,6 @@
-# OpsFlow
+# Kestro
 
-A professional SOC/operations investigation workspace: turn incoming alerts into structured, evidence-backed, auditable cases.
+SOC Operations & Investigation Platform: turn incoming alerts into structured, evidence-backed, auditable cases.
 
 ## Stack
 
@@ -19,7 +19,7 @@ Pre-implementation. Product, workflow, architecture, roadmap, and security docs 
 
 ## Docs
 
-- [`docs/PRODUCT.md`](docs/PRODUCT.md) — what OpsFlow is, who it's for, what it explicitly is not
+- [`docs/PRODUCT.md`](docs/PRODUCT.md) — what Kestro is, who it's for, what it explicitly is not
 - [`docs/WORKFLOW.md`](docs/WORKFLOW.md) — the alert → case → resolution workflow
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — system components and boundaries
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased scope

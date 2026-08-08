@@ -36,7 +36,7 @@ export default function Home() {
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold">Technical foundation</h1>
       <p className="text-black/60 dark:text-white/60">
-        This is the application shell for OpsFlow. Business features
+        This is the application shell for Kestro. Business features
         (Alerts, Cases, Evidence, Timeline) are not implemented yet — see
         docs/ROADMAP.md.
       </p>

@@ -1,8 +1,8 @@
-# OpsFlow — Security
+# Kestro — Security
 
 ## Data sensitivity
 
-OpsFlow stores security incident data: descriptions of attacks/suspicious activity, IOCs, internal system details, and sometimes personal data (e.g., an implicated employee, a customer affected by a breach). Treat all case content as sensitive by default.
+Kestro stores security incident data: descriptions of attacks/suspicious activity, IOCs, internal system details, and sometimes personal data (e.g., an implicated employee, a customer affected by a breach). Treat all case content as sensitive by default.
 
 ## Authentication
 
@@ -46,7 +46,7 @@ AI is not implemented in Milestone 1, but the schema and module boundary are des
 
 - **No secrets in logs**: application logs must never contain passwords, tokens, session identifiers, or full API keys. Log redaction is a requirement, not an afterthought, from the first logging statement written.
 - **No production command execution**: the application has no feature, endpoint, or admin path that executes arbitrary shell/OS commands, in Milestone 1 or any planned phase. If a future integration seems to need this, it needs a separate security review before design, not an assumption it's fine.
-- **No infrastructure write access**: the application holds no credentials for and makes no calls against Kubernetes, CI/CD, cloud provider APIs, or similar infrastructure control planes. OpsFlow is a business application that records investigations; it is not, and must not become, a tool that can change production infrastructure.
+- **No infrastructure write access**: the application holds no credentials for and makes no calls against Kubernetes, CI/CD, cloud provider APIs, or similar infrastructure control planes. Kestro is a business application that records investigations; it is not, and must not become, a tool that can change production infrastructure.
 - **No unjustified infrastructure**: no microservices, Redis, Kafka, message brokers, event buses, Kubernetes, or infrastructure orchestration tooling in the initial product — see docs/ARCHITECTURE.md. Each of these expands the attack surface and operational complexity; none is added without a concrete requirement.
 
 ## Secrets

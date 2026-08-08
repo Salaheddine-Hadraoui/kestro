@@ -1,4 +1,4 @@
-# OpsFlow — Workflow
+# Kestro — Workflow
 
 ## Primary workflow: Alert → Case → Resolution
 
@@ -67,4 +67,4 @@ See docs/PRODUCT.md for full role definitions. In short: an **Analyst** works th
 - Multi-step approval workflows for case resolution
 - AI-assisted suggestions (architecture reserves space for this; not built yet — see docs/ARCHITECTURE.md)
 - Binary file evidence (text-based evidence only; see docs/ROADMAP.md)
-- Hypothesis creation/evaluation — a confirmed future capability (Case → Investigation → Hypotheses → Evidence → Validation → Conclusion, see docs/PRODUCT.md), not part of the Milestone 1 investigation flow described above
+- Hypothesis creation/evaluation — a confirmed future capability (Investigation → Hypotheses → Evidence → Validation → Conclusion, see docs/PRODUCT.md), not part of the Milestone 1 investigation flow described above

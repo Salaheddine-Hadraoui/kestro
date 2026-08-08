@@ -1,29 +1,31 @@
+name: kestro
+
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: opsflow-postgres-dev
+    container_name: kestro-postgres-dev
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-opsflow}
+      POSTGRES_USER: ${POSTGRES_USER:-kestro}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-opsflow_dev_password}
-      POSTGRES_DB: ${POSTGRES_DB:-opsflow_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-kestro_dev}
     ports:
       # Bound to loopback only, and to a non-default port, so this never
       # collides with (or is reachable like) any other PostgreSQL instance
       # on the host. This is a local-development-only database.
       - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     volumes:
-      - opsflow_postgres_data:/var/lib/postgresql/data
+      - kestro_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-opsflow} -d ${POSTGRES_DB:-opsflow_dev}",
+          "pg_isready -U ${POSTGRES_USER:-kestro} -d ${POSTGRES_DB:-kestro_dev}",
         ]
       interval: 5s
       timeout: 5s
       retries: 10
 
 volumes:
-  opsflow_postgres_data:
-    name: opsflow_postgres_data_dev
+  kestro_postgres_data:
+    name: kestro_postgres_data_dev

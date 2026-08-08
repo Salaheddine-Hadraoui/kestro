@@ -4,7 +4,7 @@ Guidance for Claude Code when working in this repository.
 
 ## Project
 
-OpsFlow — a SOC/operations investigation workspace. Read `docs/PRODUCT.md`, `docs/WORKFLOW.md`, `docs/ARCHITECTURE.md`, and `docs/SECURITY.md` before making product or architecture decisions; they are the source of truth over assumptions.
+Kestro — a SOC Operations & Investigation Platform. Read `docs/PRODUCT.md`, `docs/WORKFLOW.md`, `docs/ARCHITECTURE.md`, and `docs/SECURITY.md` before making product or architecture decisions; they are the source of truth over assumptions.
 
 ## Status
 

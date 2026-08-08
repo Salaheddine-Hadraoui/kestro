@@ -5,6 +5,6 @@ import { Header } from "./header";
 describe("Header", () => {
   it("renders the application name", () => {
     render(<Header />);
-    expect(screen.getByText("OpsFlow")).toBeInTheDocument();
+    expect(screen.getByText("Kestro")).toBeInTheDocument();
   });
 });

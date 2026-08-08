@@ -26,7 +26,7 @@ async function bootstrap() {
 
   const port = config.get<number>('PORT') ?? 3001;
   await app.listen(port);
-  Logger.log(`OpsFlow API listening on port ${port}`, 'Bootstrap');
+  Logger.log(`Kestro API listening on port ${port}`, 'Bootstrap');
 }
 
 void bootstrap();

@@ -14,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "OpsFlow",
-  description: "SOC/operations investigation workspace",
+  title: "Kestro",
+  description: "SOC Operations & Investigation Platform",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

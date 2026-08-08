@@ -1,10 +1,10 @@
-# OpsFlow — Product
+# Kestro — Product
 
 ## Vision
 
-OpsFlow is a professional SOC/operations investigation workspace. It gives security analysts a single place to receive alerts, manage the resulting work as structured cases, collect evidence, collaborate with teammates, and produce a defensible record of what happened and what was done about it.
+Kestro is a SOC Operations & Investigation Platform. It gives security analysts a single place to receive alerts, manage the resulting work as structured cases, collect evidence, collaborate with teammates, and produce a defensible record of what happened and what was done about it.
 
-OpsFlow is not a SIEM, not an EDR, and not a ticketing system. It sits on top of those systems: it ingests signals from them (or from manual entry), and turns raw alerts into investigated, documented, resolved cases.
+Kestro is not a SIEM, not an EDR, and not a ticketing system. It sits on top of those systems: it ingests signals from them (or from manual entry), and turns raw alerts into investigated, documented, resolved cases.
 
 ## Target users
 
@@ -19,14 +19,21 @@ Analysts today juggle alerts across multiple tools (SIEM, EDR, ticketing, chat, 
 
 ## Domain terminology
 
-OpsFlow's terminology chain is:
+Kestro's full product-level workflow is:
 
 ```
-Alert → Case → Investigation → Resolution
+Alert → Case → Investigation → Evidence → Validation → Conclusion → Resolution
 ```
+
+That's the complete vision, not the current implementation. Two scope boundaries apply to it today, and the distinction between them is deliberate — see docs/ROADMAP.md for why:
+
+- **Milestone 1** implements: `Alert → Case → Investigation → Resolution`
+- **Future** advanced Investigation capabilities: `Investigation → Hypotheses → Evidence → Validation → Conclusion` (see "Future: Investigation & Hypotheses" below)
+
+Term definitions:
 
 - **Alert** — a detection/event originating from an external monitoring or operational source (a SIEM rule firing, an EDR detection, a manually-reported observation). An alert is a raw signal. Most alerts are noise: reviewed and dismissed without ever becoming anything more.
-- **Case** — the operational workspace used to manage a production problem: its lifecycle state, its assignee, its evidence, its timeline. **A Case is the central object in OpsFlow.** A Case may contain multiple Alerts.
+- **Case** — the operational workspace used to manage a production problem: its lifecycle state, its assignee, its evidence, its timeline. **A Case is the central object in Kestro.** A Case may contain multiple Alerts.
 - **Investigation** — the structured process performed *inside* a Case to determine what happened, identify and validate possible causes, and reach a resolution. Investigation is a future domain capability, not a full module, in Milestone 1 (see below and docs/ROADMAP.md).
 - **Resolution** — the outcome of a Case's lifecycle: the `RESOLVED` state plus its required resolution summary (see docs/WORKFLOW.md). Already part of Milestone 1's case lifecycle.
 - **Timeline Event** — an append-only, attributed record of something that happened on a case (a note, a status change, evidence being added, a comment).
@@ -38,15 +45,15 @@ Concretely, for Milestone 1: one or more related alerts get linked by an analyst
 
 ## Future: Investigation & Hypotheses (not Milestone 1)
 
-A later phase formalizes investigation as its own structured capability, following this chain:
+A later phase formalizes investigation as its own structured capability, following this chain (nested inside a Case):
 
 ```
-Case → Investigation → Hypotheses → Evidence → Validation → Conclusion
+Investigation → Hypotheses → Evidence → Validation → Conclusion
 ```
 
 - An Analyst will eventually be able to **create hypotheses** within a Case's investigation (candidate explanations for what happened) and **evaluate** them against Evidence.
 - Validating a hypothesis leads to a **Conclusion** — a human-confirmed statement of what actually happened, distinct from an unvalidated hypothesis.
-- AI may eventually **suggest** hypotheses, but an AI suggestion must remain visibly and structurally distinct from a human-confirmed conclusion, permanently — the same acceptance-gate principle that applies to all AI output in OpsFlow (see docs/ARCHITECTURE.md, docs/SECURITY.md).
+- AI may eventually **suggest** hypotheses, but an AI suggestion must remain visibly and structurally distinct from a human-confirmed conclusion, permanently — the same acceptance-gate principle that applies to all AI output in Kestro (see docs/ARCHITECTURE.md, docs/SECURITY.md).
 
 None of this — Hypotheses, Validation, Conclusion, or a full Investigation module — is implemented in Milestone 1. It is documented here so Milestone 1's Case/Evidence/Timeline design doesn't foreclose it later.
 
@@ -88,7 +95,7 @@ None of this — Hypotheses, Validation, Conclusion, or a full Investigation mod
 ## Explicit non-goals (for now)
 
 - Not a data lake / log search platform (no raw log ingestion or querying at scale)
-- Not a SIEM correlation engine — OpsFlow consumes alerts, it does not generate detections
+- Not a SIEM correlation engine — Kestro consumes alerts, it does not generate detections
 - Not a SOAR — no automated remediation actions against external systems
 - Not multi-tenant SaaS in Milestone 1 — single organization per deployment initially
 - No integrations with Kubernetes, Prometheus, Elasticsearch, RabbitMQ, Jira, or Slack in Milestone 1 — these are explicitly deferred, not designed yet

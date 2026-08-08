@@ -1,4 +1,4 @@
-# OpsFlow — Architecture
+# Kestro — Architecture
 
 ## Technology stack (final)
 
@@ -14,7 +14,7 @@ No other infrastructure is introduced in the initial version. Specifically **not
 
 ## Overview
 
-OpsFlow is a **modular monolith**: one Next.js frontend, one NestJS backend, one PostgreSQL database accessed through Prisma. The backend is internally organized into clear domain modules, but ships and runs as a single deployable application. This matches the actual load (a handful of analysts, synchronous CRUD, occasional future AI call) without the operational overhead of splitting services, adding a broker, or standing up orchestration that nothing here currently needs.
+Kestro is a **modular monolith**: one Next.js frontend, one NestJS backend, one PostgreSQL database accessed through Prisma. The backend is internally organized into clear domain modules, but ships and runs as a single deployable application. This matches the actual load (a handful of analysts, synchronous CRUD, occasional future AI call) without the operational overhead of splitting services, adding a broker, or standing up orchestration that nothing here currently needs.
 
 ```
 Next.js frontend (TS, Tailwind)
@@ -186,4 +186,4 @@ Design constraints to preserve from day one, even before this module exists:
 - **Frontend ↔ Backend**: versioned JSON REST API only. Frontend holds no secrets, makes no third-party calls, enforces no authorization decisions.
 - **Backend ↔ AI (future)**: outbound-only, backend-initiated, backend-attributed, in-process module — not a separate service. AI never writes to the DB directly.
 - **Backend ↔ future integrations**: any inbound integration is just another authenticated client of the API surface (or a narrow ingestion endpoint) handled by the future Integrations module, not a special internal path.
-- **No infrastructure write access**: the application has no credentials or code path that write to production infrastructure (servers, containers, CI/CD, Kubernetes). OpsFlow is a business application that records investigations; it is not, and must not become, a tool that can change production infrastructure.
+- **No infrastructure write access**: the application has no credentials or code path that write to production infrastructure (servers, containers, CI/CD, Kubernetes). Kestro is a business application that records investigations; it is not, and must not become, a tool that can change production infrastructure.
