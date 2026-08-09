@@ -92,8 +92,27 @@ model User {
   assignedCases          Case[]
   authoredTimelineEvents TimelineEvent[]
   authoredEvidence       Evidence[]
+  refreshTokens          RefreshToken[]
 
   @@map("users")
+}
+
+// Server-side record of an issued refresh token, keyed by the JWT's own
+// `jti` claim. The token's authenticity is verified by its signature, not by
+// this table — this row exists only to make revocation and rotation
+// possible for an otherwise-stateless JWT (docs/ARCHITECTURE.md auth
+// decisions: refresh tokens are server-side revocable; no access-token
+// denylist).
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@map("refresh_tokens")
 }
 
 model Alert {

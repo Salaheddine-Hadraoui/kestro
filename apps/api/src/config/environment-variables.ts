@@ -7,6 +7,7 @@ import {
   IsString,
   Max,
   Min,
+  MinLength,
   validateSync,
 } from 'class-validator';
 
@@ -36,6 +37,28 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   CORS_ORIGIN: string = 'http://localhost:3000';
+
+  // Required so the app fails fast at boot if JWT signing is misconfigured,
+  // rather than issuing tokens signed with an undefined secret. Access and
+  // refresh tokens are deliberately signed with distinct secrets so an
+  // access token can never be replayed as a refresh token or vice versa.
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(32)
+  JWT_ACCESS_SECRET!: string;
+
+  @IsString()
+  @IsOptional()
+  JWT_ACCESS_EXPIRES_IN: string = '15m';
+
+  @IsString()
+  @IsNotEmpty()
+  @MinLength(32)
+  JWT_REFRESH_SECRET!: string;
+
+  @IsString()
+  @IsOptional()
+  JWT_REFRESH_EXPIRES_IN: string = '30d';
 }
 
 export function validate(
