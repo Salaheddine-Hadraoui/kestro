@@ -76,6 +76,14 @@ enum EvidenceType {
   @@map("evidence_type")
 }
 
+enum HypothesisStatus {
+  proposed
+  validated
+  rejected
+
+  @@map("hypothesis_status")
+}
+
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
@@ -99,6 +107,7 @@ model User {
   authoredEvidence       Evidence[]
   refreshTokens          RefreshToken[]
   dismissedAlerts        Alert[]
+  authoredHypotheses     Hypothesis[]
 
   @@map("users")
 }
@@ -159,10 +168,39 @@ model Case {
   caseAlerts     CaseAlert[]
   timelineEvents TimelineEvent[]
   evidence       Evidence[]
+  hypotheses     Hypothesis[]
 
   @@index([status])
   @@index([assigneeId])
   @@map("cases")
+}
+
+// docs/PRODUCT.md's Investigation chain (Case -> Investigation -> Hypotheses
+// -> Evidence -> Validation -> Conclusion). No separate "Investigation"
+// table: Hypothesis attaches directly to Case, mirroring how Evidence
+// already attaches directly to Case rather than through an intermediate
+// entity. "Conclusion" is conclusionStatement on the hypothesis that gets
+// validated, not a separate table — mirrors cases.resolutionSummary's
+// conditional pattern. Evidence<->Hypothesis linking is deferred until the
+// Evidence module (schema-only today, no write API) actually exists.
+model Hypothesis {
+  id                 String           @id @default(uuid()) @db.Uuid
+  caseId             String           @map("case_id") @db.Uuid
+  authorId           String           @map("author_id") @db.Uuid
+  statement          String
+  status             HypothesisStatus @default(proposed)
+  // Required together with resolvedAt when validated; both null while
+  // proposed; resolvedAt-only (no statement) when rejected. See the
+  // hypotheses_resolution_status_check constraint.
+  conclusionStatement String?         @map("conclusion_statement")
+  resolvedAt          DateTime?       @map("resolved_at")
+  createdAt           DateTime        @default(now()) @map("created_at")
+
+  case   Case @relation(fields: [caseId], references: [id])
+  author User @relation(fields: [authorId], references: [id])
+
+  @@index([caseId])
+  @@map("hypotheses")
 }
 
 model CaseAlert {

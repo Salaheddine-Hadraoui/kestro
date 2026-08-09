@@ -14,30 +14,33 @@ See docs/ARCHITECTURE.md for the full stack decision.
 
 ## Current stage
 
-Milestone 1 (manual investigation workspace), in progress. Foundation, Auth,
-Users, Alerts, and Cases are done. Timeline and Evidence (as their own
-modules, distinct from the Cases-owned writes already happening into those
-tables) are next.
+Milestone 1 (Foundation, Auth, Users, Alerts, Cases) is complete. The project
+has now moved into **Phase 1** per docs/ROADMAP.md's own sequencing — the
+Investigations module (Hypotheses/Validation/Conclusion) is implemented.
+This is a deliberate scope transition, explicitly directed, not an
+accidental scope-creep: docs/ROADMAP.md and CLAUDE.md both frame
+Investigations as "not Milestone 1" specifically because it depends on Cases
+existing — Cases is now done, and Phase 1 has begun on that basis.
 
 ## Current checkpoint
 
-- Git: `c2ee828` on `main` (pushed to origin) plus the uncommitted Cases
-  module implementation described below — not yet committed/pushed as of
-  this writing.
-- Working tree: Cases module added, verified, not yet committed.
+- Git: `86fbf4b` on `main` (pushed to origin) — Cases module.
+- Investigations module implemented and verified on top of that; commit
+  pending as of this writing (see below).
 
 ## Module status
 
 | Module | Status | Notes |
 |---|---|---|
-| Foundation (DB schema) | Done | users, alerts, cases, case_alerts, timeline_events, evidence tables + enums, all UUID PK |
+| Foundation (DB schema) | Done | users, alerts, cases, case_alerts, timeline_events, evidence, hypotheses tables + enums, all UUID PK |
 | Auth | Done | JWT access/refresh, refresh-token rotation + revocation, RolesGuard infra |
 | Users | Done | CRUD, Lead-gated management, soft-delete (`disabledAt`) |
-| Alerts | Done | create/list/get/dismiss; case-linking explicitly deferred |
-| Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (both at creation and post-creation), visibility scoping. Zero schema changes — the Milestone-1 foundation schema already covered everything needed. |
-| Timeline | Partially exists | `timeline_events` is written by Cases (creation, transitions, alert links, reassignment) — no dedicated Timeline module/read-API exists yet (e.g. no `GET /cases/:id/timeline`). |
-| Evidence | Not started | depends on Cases (done) — no blocker now |
-| Investigations, Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
+| Alerts | Done | create/list/get/dismiss; case-linking explicitly deferred (now resolved by Cases) |
+| Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping. Zero schema changes beyond Milestone-1 foundation. |
+| Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. |
+| Timeline | Partially exists | `timeline_events` is written by Cases and Investigations — no dedicated Timeline module/read-API exists yet (e.g. no `GET /cases/:id/timeline`). |
+| Evidence | Not started | schema exists (case_id + timeline_event_id), no write API yet; Hypothesis↔Evidence linking (docs/PRODUCT.md's "evaluate against Evidence") deferred until this exists |
+| Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
 
 ## Key architectural/domain decisions already made
 
@@ -60,21 +63,30 @@ tables) are next.
 - **Case visibility is a hard server-side boundary, not a filter**: an Analyst's `GET /cases` list is always scoped to their own `assigneeId` regardless of query params; a Lead sees everything and can filter by any `assigneeId`.
 - **Linking an alert to a case is now fully implemented** (both at case creation via `alertIds` and post-creation via `POST /cases/:id/alerts`), resolving the deferral noted in the Alerts milestone. A resolved case cannot receive new alert links; only `status: new` alerts can be linked.
 - **No severity/title editing on cases** — not called for by any doc; only reassignment (Lead-only, independent of state) exists as a non-lifecycle mutation.
+- **No separate `Investigation` table**: `Hypothesis` attaches directly to `Case` (`case_id` FK), matching how `Evidence` already attaches directly to `Case` rather than through an intermediate entity — kept consistent rather than introducing two different patterns for "how child records relate to the investigation."
+- **Conclusion is a field on the hypothesis that gets validated** (`conclusionStatement`, required together with `resolvedAt` via a CHECK constraint when `status = validated`), not a separate table — mirrors `cases.resolutionSummary`'s exact conditional pattern. Rejecting a hypothesis requires no reason field (asymmetric with validation, deliberately — docs don't call for one).
+- **Hypothesis lifecycle timeline events reuse `note`** with structured `content` (`hypothesis_proposed`/`hypothesis_validated`/`hypothesis_rejected`) — same resolution already used for case reassignment, no new `TimelineEventType` value.
+- **Hypothesis actions reuse Cases' own visibility/access check** (`CasesService.findOne`, exported from `CasesModule` for this purpose) rather than duplicating the assignee-or-lead rule — Analyst must be the case's assignee, Lead always allowed.
+- **A `RESOLVED` case blocks new hypothesis activity** (create/validate/reject all rejected with 409) — mirrors the existing "resolved case rejects new alert links" rule.
+- **No Hypothesis↔Evidence linking yet** — docs/PRODUCT.md describes "evaluating hypotheses against Evidence," but Evidence has no write API at all yet (schema-only). Deferred until Evidence exists, exactly like Alerts deferred Case-linking until Cases existed.
+- **Hypothesis status transitions are one-directional** (`proposed → validated` or `proposed → rejected`, terminal) — no reopening in this pass, consistent with keeping scope to what the docs actually describe.
 
 ## Important decisions still pending
 
-- **API versioning**: docs/ARCHITECTURE.md says "REST (versioned, JSON)" but no version prefix exists on any route (`/auth/...`, `/users/...`, `/alerts/...`, `/cases/...`). Flagged three times now as a pre-existing gap, not yet resolved.
+- **API versioning**: docs/ARCHITECTURE.md says "REST (versioned, JSON)" but no version prefix exists on any route. Flagged four times now as a pre-existing gap, not yet resolved.
 - **Alert creation has no actor field** (`createdById`) — docs/SECURITY.md's audit list names dismissal and linking, not creation, and docs/ARCHITECTURE.md's alerts table doesn't include one. Left as-is; worth confirming this is intentional rather than a doc oversight.
-- **No dedicated Timeline read-API yet** — `timeline_events` rows exist and are being written correctly by Cases, but there's no `GET /cases/:id/timeline` (or similar) endpoint to read them back. Case detail responses do not currently include timeline history, only linked alerts.
+- **No dedicated Timeline read-API yet** — `timeline_events` rows exist and are being written correctly by Cases and Investigations, but there's no `GET /cases/:id/timeline` (or similar) endpoint to read them back.
 - **`VERIFYING → MITIGATING` loop-back** and **alert-linkable-to-multiple-cases** — both explicitly open in docs/ROADMAP.md, unaffected by anything built so far.
+- **Hypothesis↔Evidence linking design** — deferred until the Evidence module exists; the exact shape (join table? optional FK on evidence?) isn't decided yet.
+- **Phase 1's other named items** (comments/@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) are not part of this Investigations work and remain fully unscoped.
 
 ## Current task
 
-Cases module implementation is complete and verified (see below); not yet committed/pushed. Next: decide whether to commit, then scope the Timeline/Evidence modules.
+Investigations module implementation is complete and verified (see below); commit pending as of this writing.
 
 ## Next planned milestone
 
-**Timeline module** (read-side): expose the already-populated `timeline_events` data via an API (e.g. `GET /cases/:id/timeline`), respecting the same case-visibility rules as Cases. **Evidence module**: text-based evidence entries tied to a case + timeline event, per docs/ARCHITECTURE.md's schema (already exists, unused). No blockers remain — Cases is done.
+**Evidence module**: text-based evidence entries tied to a case + timeline event, per docs/ARCHITECTURE.md's schema (already exists, unused). Once it exists, revisit Hypothesis↔Evidence linking. **Timeline module** (read-side) is the other clear next step — expose `timeline_events` via an API respecting the same case-visibility rules.
 
 ## Known technical debt / limitations / follow-ups
 
@@ -85,6 +97,8 @@ Cases module implementation is complete and verified (see below); not yet commit
 - No API version prefix (see "pending decisions" above).
 - No Timeline read-API (see "pending decisions" above) — the data exists, the endpoint doesn't.
 - `CasesService.assertAlertsLinkable` validates alerts one at a time in a loop (N queries for N alertIds at case creation) rather than a single batched query — fine at Milestone-1 scale, worth revisiting if bulk alert-linking at creation becomes common.
+- No Hypothesis↔Evidence linking (see "pending decisions" above).
+- No re-opening of a validated/rejected hypothesis if the conclusion later turns out wrong — would currently require proposing a fresh hypothesis instead.
 
 ## Chronological change history
 
@@ -97,4 +111,5 @@ Cases module implementation is complete and verified (see below); not yet commit
 | `6c2e667` | Users module: CRUD, Lead-gated management, soft-delete (`disabledAt`), wired into Auth's login/refresh/me checks |
 | `3644735` | Alerts module: create/list/get/dismiss; dismissal audit fields (`dismissedById`/`dismissedAt`); case-linking explicitly deferred |
 | `c2ee828` | Added this PROGRESS.md tracker |
-| _(uncommitted)_ | Cases module: full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping — zero schema changes |
+| `86fbf4b` | Cases module: full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping — zero schema changes |
+| _(pending)_ | Investigations module: Hypothesis propose/validate/reject nested under a case; new `hypotheses` table + `hypothesis_status` enum; reuses Cases' visibility rule; Phase 1 begun per docs/ROADMAP.md's own sequencing |
