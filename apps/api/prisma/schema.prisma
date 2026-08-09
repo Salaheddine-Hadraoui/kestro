@@ -98,6 +98,7 @@ model User {
   authoredTimelineEvents TimelineEvent[]
   authoredEvidence       Evidence[]
   refreshTokens          RefreshToken[]
+  dismissedAlerts        Alert[]
 
   @@map("users")
 }
@@ -128,9 +129,18 @@ model Alert {
   severity      Severity
   status        AlertStatus @default(new)
   dismissReason String?     @map("dismiss_reason")
+  // Dismissal audit fields (docs/SECURITY.md requires who/what/when for
+  // alert dismissal). Not modeled via timeline_events: that table requires
+  // a case_id, and a dismissed alert — by definition of the triage decision
+  // in docs/WORKFLOW.md — never has one. Required together with
+  // dismissReason when status = dismissed, null otherwise (see the
+  // alerts_dismissal_fields_status_check constraint).
+  dismissedById String?     @map("dismissed_by_id") @db.Uuid
+  dismissedAt   DateTime?   @map("dismissed_at")
   createdAt     DateTime    @default(now()) @map("created_at")
 
-  caseAlert CaseAlert?
+  dismissedBy User?      @relation(fields: [dismissedById], references: [id], onDelete: Restrict)
+  caseAlert   CaseAlert?
 
   @@map("alerts")
 }
