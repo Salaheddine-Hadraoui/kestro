@@ -13,6 +13,7 @@ interface FakeUserRow {
   passwordHash: string;
   name: string;
   role: UserRole;
+  disabledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -113,6 +114,7 @@ describe('Auth (e2e)', () => {
       passwordHash: await hashPassword(credentials.password),
       name: 'Analyst One',
       role: UserRole.analyst,
+      disabledAt: null,
       createdAt: new Date(),
       updatedAt: new Date(),
     };

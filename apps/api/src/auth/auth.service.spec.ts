@@ -32,6 +32,7 @@ interface FakeUserRow {
   passwordHash: string;
   name: string;
   role: UserRole;
+  disabledAt: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -112,7 +113,7 @@ function createPrismaMock(seedUser: FakeUserRow) {
     },
   };
 
-  return { prisma: prisma as unknown as PrismaService, refreshTokens };
+  return { prisma: prisma as unknown as PrismaService, refreshTokens, users };
 }
 
 describe('AuthService', () => {
@@ -126,16 +127,17 @@ describe('AuthService', () => {
       passwordHash: await hashPassword('correct-password'),
       name: 'Analyst One',
       role: UserRole.analyst,
+      disabledAt: null,
       createdAt: now,
       updatedAt: now,
     };
   });
 
   function createService() {
-    const { prisma, refreshTokens } = createPrismaMock(analystUser);
+    const { prisma, refreshTokens, users } = createPrismaMock(analystUser);
     const jwt = new JwtService({});
     const service = new AuthService(prisma, jwt, createConfigService());
-    return { service, jwt, refreshTokens };
+    return { service, jwt, refreshTokens, users };
   }
 
   describe('login', () => {
@@ -152,6 +154,7 @@ describe('AuthService', () => {
         email: analystUser.email,
         name: analystUser.name,
         role: analystUser.role,
+        disabledAt: null,
         createdAt: analystUser.createdAt,
         updatedAt: analystUser.updatedAt,
       });
@@ -182,6 +185,18 @@ describe('AuthService', () => {
         service.login({
           email: 'analyst@kestro.test',
           password: 'wrong-password',
+        }),
+      ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rejects a disabled user even with the correct password', async () => {
+      const { service, users } = createService();
+      users.set(analystUser.id, { ...analystUser, disabledAt: new Date() });
+
+      await expect(
+        service.login({
+          email: 'analyst@kestro.test',
+          password: 'correct-password',
         }),
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
@@ -223,6 +238,21 @@ describe('AuthService', () => {
       await expect(
         service.refresh({ refreshToken: 'not-a-real-token' }),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+
+    it('rejects a valid refresh token belonging to a now-disabled user', async () => {
+      const { service, users } = createService();
+
+      const { refreshToken } = await service.login({
+        email: 'analyst@kestro.test',
+        password: 'correct-password',
+      });
+
+      users.set(analystUser.id, { ...analystUser, disabledAt: new Date() });
+
+      await expect(service.refresh({ refreshToken })).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
     });
   });
 
@@ -266,6 +296,7 @@ describe('AuthService', () => {
         email: analystUser.email,
         name: analystUser.name,
         role: analystUser.role,
+        disabledAt: null,
         createdAt: analystUser.createdAt,
         updatedAt: analystUser.updatedAt,
       });
@@ -275,6 +306,15 @@ describe('AuthService', () => {
       const { service } = createService();
 
       await expect(service.me('does-not-exist')).rejects.toBeInstanceOf(
+        UnauthorizedException,
+      );
+    });
+
+    it('rejects a disabled user', async () => {
+      const { service, users } = createService();
+      users.set(analystUser.id, { ...analystUser, disabledAt: new Date() });
+
+      await expect(service.me(analystUser.id)).rejects.toBeInstanceOf(
         UnauthorizedException,
       );
     });

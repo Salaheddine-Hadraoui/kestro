@@ -45,7 +45,11 @@ export class AuthService {
       where: { email: dto.email },
     });
 
-    if (!user || !(await verifyPassword(dto.password, user.passwordHash))) {
+    if (
+      !user ||
+      user.disabledAt ||
+      !(await verifyPassword(dto.password, user.passwordHash))
+    ) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -73,7 +77,7 @@ export class AuthService {
       where: { id: stored.userId },
     });
 
-    if (!user) {
+    if (!user || user.disabledAt) {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
@@ -105,7 +109,7 @@ export class AuthService {
   async me(userId: string): Promise<PublicUser> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
 
-    if (!user) {
+    if (!user || user.disabledAt) {
       throw new UnauthorizedException();
     }
 
@@ -163,6 +167,7 @@ export class AuthService {
       email: user.email,
       name: user.name,
       role: user.role,
+      disabledAt: user.disabledAt,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     };
