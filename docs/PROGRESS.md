@@ -22,10 +22,15 @@ accidental scope-creep: docs/ROADMAP.md and CLAUDE.md both frame
 Investigations as "not Milestone 1" specifically because it depends on Cases
 existing — Cases is now done, and Phase 1 has begun on that basis.
 
+With Timeline's read API now in place, every module named in Milestone 1
+(User, Alert, Case, Timeline Event, Evidence) has both a write path and a
+read-back path. Milestone 1 is now fully closed, including its
+previously-open Timeline gap.
+
 ## Current checkpoint
 
-- Git: `28aa8a7` on `main` (pushed to origin) — Investigations module.
-- Evidence module implemented and verified on top of that; commit pending
+- Git: `8b29089` on `main` (pushed to origin) — Evidence module.
+- Timeline module implemented and verified on top of that; commit pending
   as of this writing (see below).
 
 ## Module status
@@ -39,7 +44,7 @@ existing — Cases is now done, and Phase 1 has begun on that basis.
 | Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping. Zero schema changes beyond Milestone-1 foundation. |
 | Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. |
 | Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. |
-| Timeline | Partially exists | `timeline_events` is written by Cases, Investigations, and Evidence — no dedicated Timeline module/read-API exists yet (e.g. no `GET /cases/:id/timeline`). |
+| Timeline | Done | `GET /cases/:caseId/timeline`, read-only, nested under a case; reuses Cases' visibility check; paginated (`limit`/`offset`), deterministic chronological order, author joined in one query; zero schema changes — the Milestone-1 foundation's `timeline_events` table and existing indexes already supported this. |
 | Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
 
 ## Key architectural/domain decisions already made
@@ -75,23 +80,27 @@ existing — Cases is now done, and Phase 1 has begun on that basis.
 - **Still no Hypothesis↔Evidence link** even though Evidence now exists — explicitly confirmed to keep Evidence Case-scoped only, consistent with the existing schema (`evidence.case_id`, no `hypothesis_id`). A future nullable FK is the natural additive path if/when this becomes a real need.
 - **Evidence list ordering is by `timestamp` ascending** (when the observed fact occurred), not `createdAt` descending like Alerts/Cases — deliberately different, since evidence lists are read as a forensic chronology of what happened, not an operational triage queue of what's newest.
 - **Evidence reuses Cases' visibility/access check** and the same "resolved case rejects new activity" rule already applied to alert-linking and hypotheses — no new authorization logic invented.
+- **Timeline is read-only, one endpoint, nested under a case** (`GET /cases/:caseId/timeline`): Cases, Investigations, and Evidence already own all the write paths into `timeline_events`, so Timeline adds no write path and no second audit/event system — exactly the append-only design docs/WORKFLOW.md and docs/SECURITY.md already called for.
+- **Timeline ordering is `createdAt asc, id asc`**, not `createdAt` alone: several modules write more than one timeline event inside the same transaction (e.g. case creation plus its `alert_linked` events), and Postgres's `now()` resolves to transaction-start time, so those rows can share an identical `createdAt`. The `id` tiebreaker guarantees a stable, repeatable order across pages; it does not reconstruct true insertion order within a tied transaction, which the schema doesn't track and no doc requires.
+- **Timeline reuses `CasesService.findOne` for visibility**, identical to Investigations' and Evidence's pattern — Analyst must be the case's assignee, Lead always allowed. No new authorization logic.
+- **Timeline is paginated (`limit`/`offset`, default 25, max 100)** rather than returning the full history in one response — same shape as Cases' list endpoint, and necessary since a case's timeline grows unbounded over its lifetime.
+- **No N+1 on the author join**: `findMany({ include: { author: ... } })` is a single query pattern that Prisma is left to batch — confirmed via `EXPLAIN` that the `caseId` filter still hits the existing `timeline_events(case_id, created_at)` composite index from the Milestone-1 foundation schema; no new index was needed.
 
 ## Important decisions still pending
 
 - **API versioning**: docs/ARCHITECTURE.md says "REST (versioned, JSON)" but no version prefix exists on any route. Flagged five times now as a pre-existing gap, not yet resolved.
 - **Alert creation has no actor field** (`createdById`) — docs/SECURITY.md's audit list names dismissal and linking, not creation, and docs/ARCHITECTURE.md's alerts table doesn't include one. Left as-is; worth confirming this is intentional rather than a doc oversight.
-- **No dedicated Timeline read-API yet** — `timeline_events` rows exist and are being written correctly by Cases, Investigations, and Evidence, but there's no `GET /cases/:id/timeline` (or similar) endpoint to read them back.
 - **`VERIFYING → MITIGATING` loop-back** and **alert-linkable-to-multiple-cases** — both explicitly open in docs/ROADMAP.md, unaffected by anything built so far.
 - **Hypothesis↔Evidence linking design** — explicitly re-confirmed as deferred (see decisions above); the exact shape (nullable FK vs. join table) isn't decided.
 - **Phase 1's other named items** (comments/@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) remain fully unscoped.
 
 ## Current task
 
-Evidence module implementation is complete and verified (see below); commit pending as of this writing.
+Timeline module implementation is complete and verified (see below); commit pending as of this writing. This closes Milestone 1 in full.
 
 ## Next planned milestone
 
-**Timeline module** (read-side): expose `timeline_events` via an API (e.g. `GET /cases/:id/timeline`) respecting the same case-visibility rules already used by Cases/Investigations/Evidence — the last major Milestone-1-adjacent gap, since every module now writes to this table but nothing reads it back. Alternatively, revisit Hypothesis↔Evidence linking now that both sides exist.
+Not yet decided. Candidates carried over from earlier milestones: revisit Hypothesis↔Evidence linking now that both sides exist; resolve the still-open API versioning gap; or pick up one of Phase 1's other named items (comments/@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md), none of which are scoped yet.
 
 ## Known technical debt / limitations / follow-ups
 
@@ -100,7 +109,6 @@ Evidence module implementation is complete and verified (see below); commit pend
 - No re-enable-only endpoint for users beyond `PATCH .../{disabled:false}`.
 - `rawPayload` size limits on Alerts rely on Express's default body-parser cap; not explicitly configured.
 - No API version prefix (see "pending decisions" above).
-- No Timeline read-API (see "pending decisions" above) — the data exists, the endpoint doesn't.
 - `CasesService.assertAlertsLinkable` validates alerts one at a time in a loop (N queries for N alertIds at case creation) rather than a single batched query — fine at Milestone-1 scale, worth revisiting if bulk alert-linking at creation becomes common.
 - No Hypothesis↔Evidence linking (see "pending decisions" above).
 - No re-opening of a validated/rejected hypothesis if the conclusion later turns out wrong — would currently require proposing a fresh hypothesis instead.
@@ -119,4 +127,5 @@ Evidence module implementation is complete and verified (see below); commit pend
 | `c2ee828` | Added this PROGRESS.md tracker |
 | `86fbf4b` | Cases module: full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping — zero schema changes |
 | `28aa8a7` | Investigations module: Hypothesis propose/validate/reject nested under a case; new `hypotheses` table + `hypothesis_status` enum; reuses Cases' visibility rule; Phase 1 begun per docs/ROADMAP.md's own sequencing |
-| _(pending)_ | Evidence module: text-based evidence create/list/get nested under a case, each writing a matching `evidence_added` timeline event; zero schema changes — the Milestone-1 foundation schema already had the complete `evidence` table |
+| `8b29089` | Evidence module: text-based evidence create/list/get nested under a case, each writing a matching `evidence_added` timeline event; zero schema changes — the Milestone-1 foundation schema already had the complete `evidence` table |
+| _(pending)_ | Timeline module: `GET /cases/:caseId/timeline` read-side API, paginated, deterministic order, author joined, reusing Cases' visibility rule; zero schema changes; closes Milestone 1 |
