@@ -4,11 +4,13 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { CaseStatus } from '../../generated/prisma/client';
-import type { Hypothesis } from '../../generated/prisma/client';
+import type { Evidence, Hypothesis } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CasesService } from '../cases/cases.service';
+import { EvidenceService } from '../evidence/evidence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { CreateHypothesisDto } from './dto/create-hypothesis.dto';
+import type { LinkEvidenceDto } from './dto/link-evidence.dto';
 import type { ValidateHypothesisDto } from './dto/validate-hypothesis.dto';
 
 @Injectable()
@@ -16,6 +18,7 @@ export class InvestigationsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly casesService: CasesService,
+    private readonly evidenceService: EvidenceService,
   ) {}
 
   async create(
@@ -125,6 +128,69 @@ export class InvestigationsService {
         },
       });
       return updated;
+    });
+  }
+
+  // Links a piece of Case-scoped Evidence to a Hypothesis for evaluation
+  // (docs/PRODUCT.md's "evaluating hypotheses against Evidence"). At most
+  // one hypothesis per evidence item — mirrors the "one case per alert"
+  // rule already used for Alert<->Case linking — so relinking already-linked
+  // evidence is rejected, not overwritten. Evidence stays append-only: this
+  // sets exactly one field via a narrow, audited action, the same way
+  // reassignment mutates a Case without reopening it to generic PATCH.
+  async linkEvidence(
+    actor: AuthenticatedUser,
+    caseId: string,
+    hypothesisId: string,
+    dto: LinkEvidenceDto,
+  ): Promise<Evidence> {
+    await this.assertCaseAccessible(actor, caseId);
+    await this.findHypothesisOrThrow(caseId, hypothesisId);
+
+    // Reuses EvidenceService.findOne, which already enforces both case
+    // visibility and "evidence belongs to this case" (404 otherwise) — not
+    // duplicated here, same pattern used throughout this codebase.
+    const evidence = await this.evidenceService.findOne(
+      actor,
+      caseId,
+      dto.evidenceId,
+    );
+
+    if (evidence.hypothesisId) {
+      throw new ConflictException('Evidence is already linked to a hypothesis');
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.evidence.update({
+        where: { id: evidence.id },
+        data: { hypothesisId },
+      });
+      await tx.timelineEvent.create({
+        data: {
+          caseId,
+          type: 'note',
+          authorId: actor.userId,
+          content: {
+            event: 'evidence_linked_to_hypothesis',
+            hypothesisId,
+            evidenceId: evidence.id,
+          },
+        },
+      });
+      return updated;
+    });
+  }
+
+  async findLinkedEvidence(
+    actor: AuthenticatedUser,
+    caseId: string,
+    hypothesisId: string,
+  ): Promise<Evidence[]> {
+    await this.casesService.findOne(actor, caseId);
+    await this.findHypothesisOrThrow(caseId, hypothesisId);
+    return this.prisma.evidence.findMany({
+      where: { hypothesisId },
+      orderBy: { timestamp: 'asc' },
     });
   }
 

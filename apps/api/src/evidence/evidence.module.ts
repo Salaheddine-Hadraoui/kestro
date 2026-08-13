@@ -7,5 +7,6 @@ import { EvidenceService } from './evidence.service';
   imports: [CasesModule],
   controllers: [EvidenceController],
   providers: [EvidenceService],
+  exports: [EvidenceService],
 })
 export class EvidenceModule {}

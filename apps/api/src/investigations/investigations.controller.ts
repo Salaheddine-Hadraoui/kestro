@@ -12,6 +12,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CreateHypothesisDto } from './dto/create-hypothesis.dto';
+import { LinkEvidenceDto } from './dto/link-evidence.dto';
 import { ValidateHypothesisDto } from './dto/validate-hypothesis.dto';
 import { InvestigationsService } from './investigations.service';
 
@@ -74,5 +75,36 @@ export class InvestigationsController {
     @Param('hypothesisId') hypothesisId: string,
   ) {
     return this.investigationsService.reject(actor, caseId, hypothesisId);
+  }
+
+  // Links existing, Case-scoped Evidence to this hypothesis — 200, not 201,
+  // matching CasesController.linkAlert's "linking an existing resource" tone.
+  @Post(':hypothesisId/evidence')
+  @HttpCode(HttpStatus.OK)
+  linkEvidence(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Param('hypothesisId') hypothesisId: string,
+    @Body() dto: LinkEvidenceDto,
+  ) {
+    return this.investigationsService.linkEvidence(
+      actor,
+      caseId,
+      hypothesisId,
+      dto,
+    );
+  }
+
+  @Get(':hypothesisId/evidence')
+  findLinkedEvidence(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('caseId') caseId: string,
+    @Param('hypothesisId') hypothesisId: string,
+  ) {
+    return this.investigationsService.findLinkedEvidence(
+      actor,
+      caseId,
+      hypothesisId,
+    );
   }
 }

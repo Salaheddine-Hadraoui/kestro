@@ -3,9 +3,15 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { CaseStatus, Severity, UserRole } from '../../generated/prisma/client';
+import {
+  CaseStatus,
+  EvidenceType,
+  Severity,
+  UserRole,
+} from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CasesService } from '../cases/cases.service';
+import { EvidenceService } from '../evidence/evidence.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { InvestigationsService } from './investigations.service';
 
@@ -44,6 +50,19 @@ interface FakeTimelineEventRow {
   content: unknown;
 }
 
+interface FakeEvidenceRow {
+  id: string;
+  caseId: string;
+  timelineEventId: string;
+  hypothesisId: string | null;
+  type: EvidenceType;
+  source: string;
+  content: string;
+  timestamp: Date;
+  authorId: string;
+  createdAt: Date;
+}
+
 function createPrismaMock(seed: {
   users?: FakeUserRow[];
   cases?: FakeCaseRow[];
@@ -55,6 +74,7 @@ function createPrismaMock(seed: {
     (seed.cases ?? []).map((c) => [c.id, c]),
   );
   const hypotheses = new Map<string, FakeHypothesisRow>();
+  const evidence = new Map<string, FakeEvidenceRow>();
   const timelineEvents: FakeTimelineEventRow[] = [];
   let nextId = 1;
 
@@ -132,6 +152,61 @@ function createPrismaMock(seed: {
         return row;
       },
     },
+    evidence: {
+      create: ({
+        data,
+      }: {
+        data: {
+          caseId: string;
+          timelineEventId: string;
+          type: EvidenceType;
+          source: string;
+          content: string;
+          timestamp: Date;
+          authorId: string;
+        };
+      }): FakeEvidenceRow => {
+        const row: FakeEvidenceRow = {
+          id: `ev-${nextId++}`,
+          hypothesisId: null,
+          ...data,
+          createdAt: new Date(),
+        };
+        evidence.set(row.id, row);
+        return row;
+      },
+      findUnique: ({
+        where,
+      }: {
+        where: { id: string };
+      }): FakeEvidenceRow | null => evidence.get(where.id) ?? null,
+      update: ({
+        where,
+        data,
+      }: {
+        where: { id: string };
+        data: Partial<FakeEvidenceRow>;
+      }): FakeEvidenceRow => {
+        const row = evidence.get(where.id);
+        if (!row) throw new Error('evidence not found');
+        const updated = { ...row, ...data };
+        evidence.set(where.id, updated);
+        return updated;
+      },
+      findMany: ({
+        where,
+      }: {
+        where: { hypothesisId?: string; caseId?: string };
+      }): FakeEvidenceRow[] =>
+        [...evidence.values()]
+          .filter(
+            (e) =>
+              (where.hypothesisId === undefined ||
+                e.hypothesisId === where.hypothesisId) &&
+              (where.caseId === undefined || e.caseId === where.caseId),
+          )
+          .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+    },
     $transaction: async <T>(fn: (tx: any) => Promise<T>): Promise<T> =>
       fn(client),
   };
@@ -140,6 +215,7 @@ function createPrismaMock(seed: {
     prisma: client as unknown as PrismaService,
     cases,
     hypotheses,
+    evidence,
     timelineEvents,
   };
 }
@@ -175,15 +251,30 @@ describe('InvestigationsService', () => {
     };
   }
 
-  function createServices(caseOverrides: Partial<FakeCaseRow> = {}) {
+  function createServices(
+    caseOverrides: Partial<FakeCaseRow> = {},
+    extraCases: FakeCaseRow[] = [],
+  ) {
     const mock = createPrismaMock({
       users: activeUsers,
-      cases: [makeCase(caseOverrides)],
+      cases: [makeCase(caseOverrides), ...extraCases],
     });
     const casesService = new CasesService(mock.prisma);
-    const service = new InvestigationsService(mock.prisma, casesService);
-    return { service, ...mock };
+    const evidenceService = new EvidenceService(mock.prisma, casesService);
+    const service = new InvestigationsService(
+      mock.prisma,
+      casesService,
+      evidenceService,
+    );
+    return { service, evidenceService, ...mock };
   }
+
+  const baseEvidenceDto = {
+    type: EvidenceType.LOG,
+    source: 'firewall',
+    content: 'Denied connection from 10.0.0.5 to 10.0.0.10:445',
+    timestamp: '2026-01-01T00:00:00.000Z',
+  };
 
   describe('create', () => {
     it('proposes a hypothesis and records a timeline event', async () => {
@@ -346,6 +437,236 @@ describe('InvestigationsService', () => {
       await expect(
         service.reject(analyst, 'case-1', hyp.id),
       ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('linkEvidence', () => {
+    it('links evidence to a hypothesis and records a timeline event', async () => {
+      const { service, evidenceService, timelineEvents } = createServices();
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+      const evidence = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+
+      const result = await service.linkEvidence(analyst, 'case-1', hyp.id, {
+        evidenceId: evidence.id,
+      });
+
+      expect(result.hypothesisId).toBe(hyp.id);
+      expect(
+        timelineEvents.some(
+          (e) =>
+            (e.content as Record<string, unknown>).event ===
+            'evidence_linked_to_hypothesis',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows a Lead to link evidence on any case', async () => {
+      const { service, evidenceService } = createServices();
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+      const evidence = await evidenceService.create(
+        lead,
+        'case-1',
+        baseEvidenceDto,
+      );
+
+      await expect(
+        service.linkEvidence(lead, 'case-1', hyp.id, {
+          evidenceId: evidence.id,
+        }),
+      ).resolves.toMatchObject({ hypothesisId: hyp.id });
+    });
+
+    it("forbids an Analyst from linking evidence on a case they aren't assigned to", async () => {
+      const { service, evidenceService } = createServices();
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+      const evidence = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+
+      await expect(
+        service.linkEvidence(otherAnalyst, 'case-1', hyp.id, {
+          evidenceId: evidence.id,
+        }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('throws NotFoundException for an unknown hypothesis', async () => {
+      const { service, evidenceService } = createServices();
+      const evidence = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+
+      await expect(
+        service.linkEvidence(analyst, 'case-1', 'does-not-exist', {
+          evidenceId: evidence.id,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('throws NotFoundException for an unknown evidence id', async () => {
+      const { service } = createServices();
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+
+      await expect(
+        service.linkEvidence(analyst, 'case-1', hyp.id, {
+          evidenceId: 'does-not-exist',
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects linking evidence that belongs to a different case', async () => {
+      const { service, evidenceService } = createServices({}, [
+        makeCase({ id: 'case-2', assigneeId: 'analyst-1' }),
+      ]);
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+      const evidenceOnOtherCase = await evidenceService.create(
+        analyst,
+        'case-2',
+        baseEvidenceDto,
+      );
+
+      await expect(
+        service.linkEvidence(analyst, 'case-1', hyp.id, {
+          evidenceId: evidenceOnOtherCase.id,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects linking a hypothesis that belongs to a different case', async () => {
+      const { service, evidenceService } = createServices({}, [
+        makeCase({ id: 'case-2', assigneeId: 'analyst-1' }),
+      ]);
+      const hypOnOtherCase = await service.create(analyst, 'case-2', {
+        statement: 'x',
+      });
+      const evidence = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+
+      await expect(
+        service.linkEvidence(analyst, 'case-1', hypOnOtherCase.id, {
+          evidenceId: evidence.id,
+        }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('rejects linking evidence that is already linked to a hypothesis', async () => {
+      const { service, evidenceService } = createServices();
+      const hyp1 = await service.create(analyst, 'case-1', {
+        statement: 'first hypothesis',
+      });
+      const hyp2 = await service.create(analyst, 'case-1', {
+        statement: 'second hypothesis',
+      });
+      const evidence = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+      await service.linkEvidence(analyst, 'case-1', hyp1.id, {
+        evidenceId: evidence.id,
+      });
+
+      await expect(
+        service.linkEvidence(analyst, 'case-1', hyp2.id, {
+          evidenceId: evidence.id,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+      // Re-linking to the very same hypothesis is rejected too — the
+      // relationship is set-once, not idempotent.
+      await expect(
+        service.linkEvidence(analyst, 'case-1', hyp1.id, {
+          evidenceId: evidence.id,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('rejects linking evidence on a resolved case', async () => {
+      const { service, evidenceService, cases } = createServices();
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+      const evidence = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+      cases.set('case-1', {
+        ...cases.get('case-1')!,
+        status: CaseStatus.RESOLVED,
+        resolutionSummary: 'done',
+      });
+
+      await expect(
+        service.linkEvidence(analyst, 'case-1', hyp.id, {
+          evidenceId: evidence.id,
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
+
+  describe('findLinkedEvidence', () => {
+    it('lists only evidence linked to the given hypothesis', async () => {
+      const { service, evidenceService } = createServices();
+      const hyp1 = await service.create(analyst, 'case-1', {
+        statement: 'first hypothesis',
+      });
+      const hyp2 = await service.create(analyst, 'case-1', {
+        statement: 'second hypothesis',
+      });
+      const linked = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+      const unlinked = await evidenceService.create(
+        analyst,
+        'case-1',
+        baseEvidenceDto,
+      );
+      await service.linkEvidence(analyst, 'case-1', hyp1.id, {
+        evidenceId: linked.id,
+      });
+
+      const resultForHyp1 = await service.findLinkedEvidence(
+        analyst,
+        'case-1',
+        hyp1.id,
+      );
+      const resultForHyp2 = await service.findLinkedEvidence(
+        analyst,
+        'case-1',
+        hyp2.id,
+      );
+
+      expect(resultForHyp1.map((e) => e.id)).toEqual([linked.id]);
+      expect(resultForHyp1.map((e) => e.id)).not.toContain(unlinked.id);
+      expect(resultForHyp2).toEqual([]);
+    });
+
+    it("forbids an Analyst from reading evidence on a case they aren't assigned to", async () => {
+      const { service } = createServices();
+      const hyp = await service.create(analyst, 'case-1', { statement: 'x' });
+
+      await expect(
+        service.findLinkedEvidence(otherAnalyst, 'case-1', hyp.id),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('throws NotFoundException for an unknown hypothesis', async () => {
+      const { service } = createServices();
+
+      await expect(
+        service.findLinkedEvidence(analyst, 'case-1', 'does-not-exist'),
+      ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
 });

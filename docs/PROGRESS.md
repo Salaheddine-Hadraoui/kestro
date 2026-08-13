@@ -32,17 +32,22 @@ A Milestone 1 readiness audit was then run against checkpoint `20d5894`
 implementation solid — schema, transactions, the case state machine, and
 visibility scoping all matched the docs, with 177 tests passing — but
 surfaced three must-fix process/completeness gaps and one confirmed
-security bug. A **hardening pass** addressed all four (see "Milestone 1
-hardening pass" below) before any further feature milestone begins.
+security bug. A **hardening pass** (`6c2b16b`) addressed all four (see
+"Milestone 1 hardening pass" below).
+
+With that done, the **Hypothesis ↔ Evidence milestone** implements the
+last piece of docs/PRODUCT.md's Investigation chain that had working
+material on both sides already built: a hypothesis can now be evaluated
+against Case-scoped evidence (see "Hypothesis ↔ Evidence milestone" below).
 
 ## Current checkpoint
 
-- Git: `20d5894` on `main` — Timeline read API; this is the checkpoint the
-  readiness audit ran against and the hardening pass below was built on.
-- Hardening pass (CLAUDE.md/PROGRESS.md reconciliation, `/v1` versioning,
-  Notes/Comments, refresh-token rotation fix) implemented and verified on
-  top of that; commit pending as of this writing (see "Chronological change
-  history" below).
+- Git: `6c2b16b` on `main` — Milestone 1 hardening pass (CLAUDE.md/PROGRESS.md
+  reconciliation, `/v1` versioning, Notes/Comments, refresh-token rotation
+  fix).
+- Hypothesis ↔ Evidence linking implemented and verified on top of that;
+  commit pending as of this writing (see "Chronological change history"
+  below).
 
 ## Module status
 
@@ -53,8 +58,8 @@ hardening pass" below) before any further feature milestone begins.
 | Users | Done | CRUD, Lead-gated management, soft-delete (`disabledAt`) |
 | Alerts | Done | create/list/get/dismiss; case-linking explicitly deferred (now resolved by Cases) |
 | Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping, freeform notes and comments (hardening pass). Zero schema changes beyond Milestone-1 foundation. |
-| Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. |
-| Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. |
+| Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. Now also owns linking Case-scoped Evidence to a Hypothesis for evaluation (Hypothesis ↔ Evidence milestone). |
+| Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. Now carries an optional `hypothesisId` (Hypothesis ↔ Evidence milestone), set only via Investigations' link action, never at evidence-creation time. |
 | Timeline | Done | `GET /cases/:caseId/timeline`, read-only, nested under a case; reuses Cases' visibility check; paginated (`limit`/`offset`), deterministic chronological order, author joined in one query; zero schema changes — the Milestone-1 foundation's `timeline_events` table and existing indexes already supported this. |
 | Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
 
@@ -71,6 +76,27 @@ run at that same checkpoint. Four required fixes, in scope order:
 **Verification**: `prisma validate` clean; `tsc --noEmit` clean; `eslint --fix` clean; unit tests 113/113 passing (was 104; +9 for the race regression test and the 8 new addNote/addComment cases); e2e tests 85/85 passing (was 73; +12 for Notes/Comments authorization/validation/resolved-case coverage, plus the existing cross-module timeline test extended to cover both new event types); `nest build` clean. Real-DB verification was done against the dedicated `kestro-postgres-dev` container (not just the Jest-mocked Prisma the rest of the suite uses): `prisma migrate status` confirmed no drift (this pass made no schema changes), then the compiled app was booted against it, exercised end-to-end over real HTTP (login, case creation, `/v1/cases/:id/notes`, `/v1/cases/:id/comments`, `GET /v1/cases/:id/timeline`, plus confirming `/health` still resolves unprefixed while `/v1/health` correctly 404s) with a throwaway user/case/timeline rows, then torn back down to leave the dev DB exactly as it was found. This also incidentally confirmed the `comment` enum value — reserved in the schema since Milestone 1 but never exercised by any code path until this pass — round-trips through real Postgres correctly.
 
 **Findings not addressed in this pass**: per explicit scope instruction, the audit's "should fix soon" (B-tier) findings were deliberately left untouched and are recorded under "Known technical debt" below rather than fixed opportunistically.
+
+## Hypothesis ↔ Evidence milestone
+
+Implements docs/PRODUCT.md's "evaluating hypotheses against Evidence" — the one piece of the Investigation chain where both sides (Hypotheses, Evidence) already existed independently but weren't connected.
+
+**Schema decision**: a nullable `hypothesisId` on `Evidence` (FK to `Hypothesis`, `onDelete: Restrict` matching every other FK in this schema), not a many-to-many join table. Evidence's `caseId` stays mandatory and unchanged — Evidence remains Case-scoped, full stop; `hypothesisId` is a strictly additional, optional pointer within that same case. This was resolvable from existing precedent without needing to ask: PROGRESS.md's own prior entry for this exact deferred decision already said "a future nullable FK is the natural additive path," and nothing in docs/PRODUCT.md or docs/WORKFLOW.md calls for one piece of evidence supporting multiple hypotheses simultaneously — a richer many-to-many model would have been unjustified complexity. The relationship is one-hypothesis-per-evidence-item, mirroring the existing "one case per alert" constraint on `case_alerts`: relinking already-linked evidence (to the same or a different hypothesis) is rejected with 409, not silently overwritten or treated as a no-op.
+
+**API** (all under the existing Investigations module — no new module, no new controller):
+- `POST /v1/cases/:caseId/hypotheses/:hypothesisId/evidence` `{ evidenceId }` — links existing, Case-scoped evidence to the hypothesis. `200 OK` (linking an existing resource, matching `CasesController.linkAlert`'s convention), returns the updated Evidence row. Evidence can only be linked after creation, via this one action — there is no `hypothesisId` field on `CreateEvidenceDto`. This keeps Evidence's append-only guarantee intact: the only field a later action can ever set on an existing evidence row is this one link, through one narrow, audited, single-purpose endpoint — the same principle already used for Case reassignment (a mutation, but a named action, never a generic PATCH).
+- `GET /v1/cases/:caseId/hypotheses/:hypothesisId/evidence` — lists evidence linked to a hypothesis, ordered by `timestamp` ascending (matching Evidence's own listing order). The reverse direction (which hypothesis a piece of evidence is linked to, if any) needed no new endpoint: `hypothesisId` is just a field on `Evidence`, so it already appears in the existing `GET /cases/:caseId/evidence` and `GET /cases/:caseId/evidence/:evidenceId` responses.
+- No unlink endpoint — not called for by any doc, and would cut against the same append-only philosophy; a mistaken link has no correction path today, same as a mistaken piece of evidence content.
+
+**Authorization/integrity** — no new authorization logic invented, only reuse of what Cases/Evidence/Investigations already enforce:
+- Case visibility (`CasesService.findOne` / `assertCanAccess`, Analyst-must-be-assignee-or-Lead) is enforced before anything else, exactly as for every other hypothesis/evidence action.
+- Cross-case integrity for both sides is enforced by reusing existing, already-tested checks rather than new ones: the hypothesis is checked via `findHypothesisOrThrow(caseId, hypothesisId)` (same helper `validate`/`reject` already use), and the evidence is fetched via `EvidenceService.findOne(actor, caseId, evidenceId)` (same method Evidence's own controller uses) — both throw `NotFoundException` if the id belongs to a different case, so a cross-case linking attempt looks identical to a nonexistent id, leaking no information about the other case's contents. `EvidenceModule` now exports `EvidenceService` so `InvestigationsModule` can import it for this reuse (no circular dependency: Investigations → Evidence → Cases is a valid chain).
+- Resolved-case rule preserved: linking is blocked with 409 on a `RESOLVED` case, via the same `assertCaseAccessible` helper `create`/`validate`/`reject` already use.
+- Linking writes a timeline event (`note` type, `content: {event: 'evidence_linked_to_hypothesis', hypothesisId, evidenceId}`) in the same `$transaction` as the evidence update — audit behavior preserved, no exceptions.
+
+**Verification**: `prisma validate` and `prisma migrate status` clean (migration `20260813192734_link_evidence_to_hypothesis`, additive: one nullable column, one index, one FK — no data migration needed). `tsc --noEmit`, `eslint --fix`, and `nest build` all clean. Unit tests 125/125 passing (was 113; +12 for `linkEvidence`/`findLinkedEvidence` covering valid linking, cross-case rejection on both the evidence and the hypothesis side, Analyst/Lead authorization, unauthorized access, missing ids, duplicate-link rejection, and resolved-case blocking). E2E tests 98/98 passing (was 85; +13, same scenarios exercised over real HTTP end-to-end). Real-DB verification against `kestro-postgres-dev`: confirmed the migration's column/index/FK shape directly via `\d evidence`, then booted the compiled app against it and drove the full flow over real HTTP — create case, propose hypothesis, add evidence, link, list, confirm the timeline event, confirm re-linking correctly 409s, confirm the plain `GET evidence` endpoint already reflects the link — before cleaning up all throwaway rows.
+
+**Deliberately deferred**: no unlink endpoint (see above); no way to link evidence to a hypothesis at creation time (only after, via the link endpoint — see API section); many-to-many (one evidence item to many hypotheses) was considered and explicitly rejected as unjustified by current docs, not merely postponed — revisit only if a real product need for it appears.
 
 ## Key architectural/domain decisions already made
 
@@ -98,11 +124,11 @@ run at that same checkpoint. Four required fixes, in scope order:
 - **Hypothesis lifecycle timeline events reuse `note`** with structured `content` (`hypothesis_proposed`/`hypothesis_validated`/`hypothesis_rejected`) — same resolution already used for case reassignment, no new `TimelineEventType` value.
 - **Hypothesis actions reuse Cases' own visibility/access check** (`CasesService.findOne`, exported from `CasesModule` for this purpose) rather than duplicating the assignee-or-lead rule — Analyst must be the case's assignee, Lead always allowed.
 - **A `RESOLVED` case blocks new hypothesis activity** (create/validate/reject all rejected with 409) — mirrors the existing "resolved case rejects new alert links" rule.
-- **No Hypothesis↔Evidence linking yet** — docs/PRODUCT.md describes "evaluating hypotheses against Evidence," but Evidence has no write API at all yet (schema-only). Deferred until Evidence exists, exactly like Alerts deferred Case-linking until Cases existed.
+- ~~No Hypothesis↔Evidence linking yet~~ — **superseded**, see "Hypothesis ↔ Evidence milestone" above: implemented once Evidence existed, exactly as this entry anticipated.
 - **Hypothesis status transitions are one-directional** (`proposed → validated` or `proposed → rejected`, terminal) — no reopening in this pass, consistent with keeping scope to what the docs actually describe.
 - **Evidence is append-only** — no update/delete endpoints, matching Timeline's explicit append-only philosophy and the general "no generic PATCH" pattern used for Alerts/Cases. Editing a mistake means adding new evidence, not correcting old evidence.
 - **Evidence creation writes its timeline event first, then the evidence row referencing it** (`evidence.timeline_event_id` is required and FKs to that event) — the schema's own shape already fixed this design; `TimelineEventType.evidence_added` already existed for exactly this purpose, so no enum/schema decision was needed here (unlike Alert dismissal or Case reassignment, which both needed one).
-- **Still no Hypothesis↔Evidence link** even though Evidence now exists — explicitly confirmed to keep Evidence Case-scoped only, consistent with the existing schema (`evidence.case_id`, no `hypothesis_id`). A future nullable FK is the natural additive path if/when this becomes a real need.
+- ~~Still no Hypothesis↔Evidence link even though Evidence now exists~~ — **superseded**, see "Hypothesis ↔ Evidence milestone" above: the nullable FK this entry predicted is exactly what got built.
 - **Evidence list ordering is by `timestamp` ascending** (when the observed fact occurred), not `createdAt` descending like Alerts/Cases — deliberately different, since evidence lists are read as a forensic chronology of what happened, not an operational triage queue of what's newest.
 - **Evidence reuses Cases' visibility/access check** and the same "resolved case rejects new activity" rule already applied to alert-linking and hypotheses — no new authorization logic invented.
 - **Timeline is read-only, one endpoint, nested under a case** (`GET /cases/:caseId/timeline`): Cases, Investigations, and Evidence already own all the write paths into `timeline_events`, so Timeline adds no write path and no second audit/event system — exactly the append-only design docs/WORKFLOW.md and docs/SECURITY.md already called for.
@@ -113,21 +139,22 @@ run at that same checkpoint. Four required fixes, in scope order:
 - **API versioning is a single static `/v1` prefix** (`app.setGlobalPrefix('v1', { exclude: ['health'] })`), not Nest's built-in URI-versioning system — nothing today needs multiple simultaneously-served versions, so the simpler mechanism is the correct one; do not introduce `/v2` or a versioning framework without a concrete requirement.
 - **Notes and comments have no dedicated table** — both are pure `timeline_events` rows (`note` / `comment` types) created via `POST /cases/:id/notes` and `POST /cases/:id/comments` on the existing Cases module, not a new module. A human-authored note's `content` carries an `event: 'note_added'` discriminator (the `note` type is already overloaded for system-generated entries); `comment` needed none, being new and single-purpose.
 - **Refresh-token revocation is now conditional, not unconditional**: `refresh()`'s revoke step uses `updateMany({ where: { id, revokedAt: null } })` (same pattern as `logout()`) instead of a plain `update()`, so two concurrent requests racing the same not-yet-revoked token can't both succeed — closes a confirmed (regression-tested) race that let a single-use refresh token mint two valid sessions.
+- **Evidence↔Hypothesis is a nullable FK, one hypothesis per evidence item** (`evidence.hypothesis_id`, `onDelete: Restrict`) — not a many-to-many join table. Mirrors `case_alerts`' "one case per alert" constraint: relinking already-linked evidence is a 409, not an overwrite. See "Hypothesis ↔ Evidence milestone" above.
+- **Linking evidence to a hypothesis is a narrow, one-purpose action** (`POST .../hypotheses/:hypothesisId/evidence`), not a field on `CreateEvidenceDto` — keeps Evidence's append-only guarantee intact (no field on an existing evidence row is ever set except through this one audited action) and covers the more common real workflow (evidence collected first, hypotheses formed and evaluated against it afterward).
 
 ## Important decisions still pending
 
 - **Alert creation has no actor field** (`createdById`) — docs/SECURITY.md's audit list names dismissal and linking, not creation, and docs/ARCHITECTURE.md's alerts table doesn't include one. Left as-is; worth confirming this is intentional rather than a doc oversight.
 - **`VERIFYING → MITIGATING` loop-back** and **alert-linkable-to-multiple-cases** — both explicitly open in docs/ROADMAP.md, unaffected by anything built so far.
-- **Hypothesis↔Evidence linking design** — explicitly re-confirmed as deferred (see decisions above); the exact shape (nullable FK vs. join table) isn't decided. This is the leading candidate for the next milestone (see below).
-- **Phase 1's other named items** (@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) remain fully unscoped. Comments themselves are no longer on this list — see the hardening pass above.
+- **Phase 1's other named items** (@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) remain fully unscoped. Comments are no longer on this list (hardening pass), and Hypothesis↔Evidence linking is no longer on this list (this milestone).
 
 ## Current task
 
-Milestone 1 hardening pass is complete and verified (see above); commit pending as of this writing. Not yet started: Hypothesis↔Evidence linking (see "Next planned milestone").
+Hypothesis ↔ Evidence linking is complete and verified (see above); commit pending as of this writing. No other work in progress.
 
 ## Next planned milestone
 
-**Hypothesis↔Evidence linking.** Both sides of this relationship now exist independently and are well-tested (Investigations and Evidence, both shipped in earlier milestones); this is the natural completion of docs/PRODUCT.md's `Investigation → Hypotheses → Evidence → Validation → Conclusion` chain, doesn't require scoping a brand-new module (unlike Playbooks/Knowledge/AI, all still explicitly unscoped per CLAUDE.md), and has been carried as an open decision across three prior milestone entries. Not started as of this writing.
+Not yet decided. With the Investigation chain's core relationships now in place and the hardening pass's must-fix items resolved, candidates are: pick up one of Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md, none scoped yet), or work through the hardening audit's still-deferred B-tier findings (see "Known technical debt" below) as a second, smaller hardening pass. Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
 
 ## Known technical debt / limitations / follow-ups
 
@@ -136,8 +163,9 @@ Milestone 1 hardening pass is complete and verified (see above); commit pending 
 - No re-enable-only endpoint for users beyond `PATCH .../{disabled:false}`.
 - `rawPayload` size limits on Alerts rely on Express's default body-parser cap; not explicitly configured.
 - `CasesService.assertAlertsLinkable` validates alerts one at a time in a loop (N queries for N alertIds at case creation) rather than a single batched query — fine at Milestone-1 scale, worth revisiting if bulk alert-linking at creation becomes common.
-- No Hypothesis↔Evidence linking (see "pending decisions" above; now the next planned milestone).
 - No re-opening of a validated/rejected hypothesis if the conclusion later turns out wrong — would currently require proposing a fresh hypothesis instead.
+- No unlink endpoint for Hypothesis↔Evidence — deliberate (see "Hypothesis ↔ Evidence milestone"), not an oversight; a mistaken link has no correction path today.
+- Evidence can only be linked to a hypothesis after creation, via the dedicated link action — not at evidence-creation time. Deliberate (keeps `CreateEvidenceDto` unchanged and Evidence's append-only guarantee simple), not a gap.
 - No evidence update/delete — intentional (append-only), but means a genuine data-entry mistake in evidence can only be superseded by new evidence, never corrected in place.
 - `CasesService.reassign` doesn't call the shared `assertCanAccess` visibility check — harmless today since only Leads (who see every case) can reach it via `RolesGuard`, but it's an implicit invariant rather than an enforced one. From the readiness audit; deliberately not fixed in the hardening pass (scoped to the four required items only).
 - No `ParseUUIDPipe` (or equivalent) on path params anywhere in the app — a malformed case/user/alert id reaches Postgres raw and the generic exception filter turns the resulting driver error into a 500 instead of a 400. From the readiness audit; deferred.
@@ -163,4 +191,5 @@ Milestone 1 hardening pass is complete and verified (see above); commit pending 
 | `28aa8a7` | Investigations module: Hypothesis propose/validate/reject nested under a case; new `hypotheses` table + `hypothesis_status` enum; reuses Cases' visibility rule; Phase 1 begun per docs/ROADMAP.md's own sequencing |
 | `8b29089` | Evidence module: text-based evidence create/list/get nested under a case, each writing a matching `evidence_added` timeline event; zero schema changes — the Milestone-1 foundation schema already had the complete `evidence` table |
 | `20d5894` | Timeline module: `GET /cases/:caseId/timeline` read-side API, paginated, deterministic order, author joined, reusing Cases' visibility rule; zero schema changes; closes Milestone 1 |
-| _(pending)_ | Milestone 1 hardening pass: CLAUDE.md/PROGRESS.md reconciliation, `/v1` API versioning, Notes/Comments (`POST /cases/:id/notes`\|`/comments`), refresh-token rotation race fix — see "Milestone 1 hardening pass" above |
+| `6c2b16b` | Milestone 1 hardening pass: CLAUDE.md/PROGRESS.md reconciliation, `/v1` API versioning, Notes/Comments (`POST /cases/:id/notes`\|`/comments`), refresh-token rotation race fix — see "Milestone 1 hardening pass" above |
+| _(pending)_ | Hypothesis ↔ Evidence linking: nullable `evidence.hypothesis_id`, `POST`/`GET /cases/:caseId/hypotheses/:hypothesisId/evidence` on the Investigations module — see "Hypothesis ↔ Evidence milestone" above |

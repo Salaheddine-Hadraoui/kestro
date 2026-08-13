@@ -181,8 +181,10 @@ model Case {
 // already attaches directly to Case rather than through an intermediate
 // entity. "Conclusion" is conclusionStatement on the hypothesis that gets
 // validated, not a separate table — mirrors cases.resolutionSummary's
-// conditional pattern. Evidence<->Hypothesis linking is deferred until the
-// Evidence module (schema-only today, no write API) actually exists.
+// conditional pattern. Evidence<->Hypothesis linking: a nullable
+// hypothesisId on Evidence (see below) — at most one hypothesis per
+// evidence item, not a many-to-many join table; nothing in the docs calls
+// for one piece of evidence supporting multiple hypotheses simultaneously.
 model Hypothesis {
   id                 String           @id @default(uuid()) @db.Uuid
   caseId             String           @map("case_id") @db.Uuid
@@ -196,8 +198,9 @@ model Hypothesis {
   resolvedAt          DateTime?       @map("resolved_at")
   createdAt           DateTime        @default(now()) @map("created_at")
 
-  case   Case @relation(fields: [caseId], references: [id])
-  author User @relation(fields: [authorId], references: [id])
+  case     Case       @relation(fields: [caseId], references: [id])
+  author   User       @relation(fields: [authorId], references: [id])
+  evidence Evidence[]
 
   @@index([caseId])
   @@map("hypotheses")
@@ -236,6 +239,12 @@ model Evidence {
   id              String       @id @default(uuid()) @db.Uuid
   caseId          String       @map("case_id") @db.Uuid
   timelineEventId String       @map("timeline_event_id") @db.Uuid
+  // Nullable: evidence is Case-scoped independent of any hypothesis, and
+  // most evidence may never be evaluated against one. Set only via the
+  // Investigations link action, never at evidence-creation time — Evidence
+  // stays append-only (see EvidenceService), this is the one field on an
+  // existing row that a later, narrow, audited action may set exactly once.
+  hypothesisId    String?      @map("hypothesis_id") @db.Uuid
   type            EvidenceType
   source          String
   content         String
@@ -245,9 +254,15 @@ model Evidence {
 
   case          Case          @relation(fields: [caseId], references: [id])
   timelineEvent TimelineEvent @relation(fields: [timelineEventId], references: [id])
+  // Restrict, not the Prisma default of SetNull for optional relations —
+  // every other FK in this schema is Restrict (see docs/PROGRESS.md); kept
+  // consistent rather than introducing the first SetNull. Moot in practice
+  // since hypotheses are never deleted via the API.
+  hypothesis    Hypothesis?   @relation(fields: [hypothesisId], references: [id], onDelete: Restrict)
   author        User          @relation(fields: [authorId], references: [id])
 
   @@index([caseId])
   @@index([timelineEventId])
+  @@index([hypothesisId])
   @@map("evidence")
 }
