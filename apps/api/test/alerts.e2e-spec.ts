@@ -209,6 +209,8 @@ describe('Alerts (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -220,10 +222,10 @@ describe('Alerts (e2e)', () => {
 
     const [analystLogin, leadLogin] = await Promise.all([
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: lead.email, password: 'lead-password' }),
     ]);
     analystToken = (analystLogin.body as { accessToken: string }).accessToken;
@@ -237,7 +239,7 @@ describe('Alerts (e2e)', () => {
   describe('POST /alerts', () => {
     it('allows an Analyst to create an alert, defaulting to status "new"', async () => {
       const response = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({
           source: 'manual',
@@ -257,7 +259,7 @@ describe('Alerts (e2e)', () => {
 
     it('allows a Lead to create an alert (no role restriction)', async () => {
       await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${leadToken}`)
         .send({
           source: 'manual',
@@ -269,14 +271,14 @@ describe('Alerts (e2e)', () => {
 
     it('requires authentication', async () => {
       await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .send({ source: 'manual', summary: 'x', severity: Severity.low })
         .expect(401);
     });
 
     it('rejects a malformed body (missing severity)', async () => {
       await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'x' })
         .expect(400);
@@ -286,23 +288,23 @@ describe('Alerts (e2e)', () => {
   describe('GET /alerts', () => {
     it('lists alerts with pagination metadata and supports status filtering', async () => {
       await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'one', severity: Severity.low });
       const second = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'two', severity: Severity.low });
       const secondId = (second.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/alerts/${secondId}/dismiss`)
+        .post(`/v1/alerts/${secondId}/dismiss`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ reason: 'noise' })
         .expect(200);
 
       const list = await request(app.getHttpServer())
-        .get('/alerts')
+        .get('/v1/alerts')
         .query({ status: AlertStatus.dismissed })
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
@@ -316,7 +318,7 @@ describe('Alerts (e2e)', () => {
   describe('GET /alerts/:id', () => {
     it('returns 404 for an unknown id', async () => {
       await request(app.getHttpServer())
-        .get('/alerts/does-not-exist')
+        .get('/v1/alerts/does-not-exist')
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(404);
     });
@@ -325,13 +327,13 @@ describe('Alerts (e2e)', () => {
   describe('POST /alerts/:id/dismiss', () => {
     it('dismisses a new alert, recording who/when/why', async () => {
       const created = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'x', severity: Severity.medium });
       const id = (created.body as { id: string }).id;
 
       const response = await request(app.getHttpServer())
-        .post(`/alerts/${id}/dismiss`)
+        .post(`/v1/alerts/${id}/dismiss`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ reason: 'False positive' })
         .expect(200);
@@ -347,19 +349,19 @@ describe('Alerts (e2e)', () => {
 
     it('rejects dismissing an already-dismissed alert', async () => {
       const created = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'x', severity: Severity.medium });
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/alerts/${id}/dismiss`)
+        .post(`/v1/alerts/${id}/dismiss`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ reason: 'first' })
         .expect(200);
 
       await request(app.getHttpServer())
-        .post(`/alerts/${id}/dismiss`)
+        .post(`/v1/alerts/${id}/dismiss`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ reason: 'second' })
         .expect(409);
@@ -367,26 +369,26 @@ describe('Alerts (e2e)', () => {
 
     it('requires authentication', async () => {
       const created = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'x', severity: Severity.medium });
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/alerts/${id}/dismiss`)
+        .post(`/v1/alerts/${id}/dismiss`)
         .send({ reason: 'x' })
         .expect(401);
     });
 
     it('rejects a missing reason', async () => {
       const created = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ source: 'manual', summary: 'x', severity: Severity.medium });
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/alerts/${id}/dismiss`)
+        .post(`/v1/alerts/${id}/dismiss`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({})
         .expect(400);

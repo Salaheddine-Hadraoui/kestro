@@ -81,12 +81,19 @@ export class AuthService {
       throw new UnauthorizedException('Invalid refresh token');
     }
 
-    // Rotate: the presented token is single-use. Revoking it before issuing
-    // the replacement means a stolen-and-replayed old token is rejected.
-    await this.prisma.refreshToken.update({
-      where: { id: stored.id },
+    // Rotate: the presented token is single-use. The revoke is conditioned
+    // on revokedAt still being null (same atomic pattern as logout()) so two
+    // concurrent requests racing the same token can't both pass the check
+    // above and both succeed — only the request whose UPDATE actually flips
+    // the row wins; the other sees count 0 and is rejected.
+    const { count } = await this.prisma.refreshToken.updateMany({
+      where: { id: stored.id, revokedAt: null },
       data: { revokedAt: new Date() },
     });
+
+    if (count === 0) {
+      throw new UnauthorizedException('Invalid refresh token');
+    }
 
     return this.issueTokenPair(user);
   }

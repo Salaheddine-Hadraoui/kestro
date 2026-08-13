@@ -266,6 +266,8 @@ describe('Investigations (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -277,13 +279,13 @@ describe('Investigations (e2e)', () => {
 
     const [analystLogin, otherAnalystLogin, leadLogin] = await Promise.all([
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: otherAnalyst.email, password: 'analyst2-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: lead.email, password: 'lead-password' }),
     ]);
     analystToken = (analystLogin.body as { accessToken: string }).accessToken;
@@ -292,7 +294,7 @@ describe('Investigations (e2e)', () => {
     leadToken = (leadLogin.body as { accessToken: string }).accessToken;
 
     const created = await request(app.getHttpServer())
-      .post('/cases')
+      .post('/v1/cases')
       .set('Authorization', `Bearer ${analystToken}`)
       .send({ title: 'Suspicious activity', severity: Severity.high });
     caseId = (created.body as { id: string }).id;
@@ -305,7 +307,7 @@ describe('Investigations (e2e)', () => {
   describe('POST /cases/:caseId/hypotheses', () => {
     it('proposes a hypothesis on an accessible case', async () => {
       const response = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'Attacker used stolen credentials' })
         .expect(201);
@@ -319,7 +321,7 @@ describe('Investigations (e2e)', () => {
 
     it("forbids an Analyst from proposing on a case they aren't assigned to", async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${otherAnalystToken}`)
         .send({ statement: 'x' })
         .expect(403);
@@ -327,14 +329,14 @@ describe('Investigations (e2e)', () => {
 
     it('requires authentication', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .send({ statement: 'x' })
         .expect(401);
     });
 
     it('rejects a malformed body', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({})
         .expect(400);
@@ -344,16 +346,16 @@ describe('Investigations (e2e)', () => {
   describe('GET /cases/:caseId/hypotheses', () => {
     it('lists hypotheses for the case', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'a' });
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${leadToken}`)
         .send({ statement: 'b' });
 
       const response = await request(app.getHttpServer())
-        .get(`/cases/${caseId}/hypotheses`)
+        .get(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -364,13 +366,13 @@ describe('Investigations (e2e)', () => {
   describe('validate / reject', () => {
     it('validates a hypothesis with a conclusion', async () => {
       const created = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'x' });
       const hypothesisId = (created.body as { id: string }).id;
 
       const response = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses/${hypothesisId}/validate`)
+        .post(`/v1/cases/${caseId}/hypotheses/${hypothesisId}/validate`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ conclusionStatement: 'Confirmed via log analysis' })
         .expect(200);
@@ -383,13 +385,13 @@ describe('Investigations (e2e)', () => {
 
     it('rejects validating without a conclusionStatement', async () => {
       const created = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'x' });
       const hypothesisId = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses/${hypothesisId}/validate`)
+        .post(`/v1/cases/${caseId}/hypotheses/${hypothesisId}/validate`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({})
         .expect(400);
@@ -397,13 +399,13 @@ describe('Investigations (e2e)', () => {
 
     it('rejects a hypothesis with no body required', async () => {
       const created = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'x' });
       const hypothesisId = (created.body as { id: string }).id;
 
       const response = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses/${hypothesisId}/reject`)
+        .post(`/v1/cases/${caseId}/hypotheses/${hypothesisId}/reject`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -412,18 +414,18 @@ describe('Investigations (e2e)', () => {
 
     it('rejects re-resolving an already-resolved hypothesis', async () => {
       const created = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'x' });
       const hypothesisId = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses/${hypothesisId}/reject`)
+        .post(`/v1/cases/${caseId}/hypotheses/${hypothesisId}/reject`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses/${hypothesisId}/reject`)
+        .post(`/v1/cases/${caseId}/hypotheses/${hypothesisId}/reject`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(409);
     });

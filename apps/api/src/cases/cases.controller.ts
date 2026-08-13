@@ -17,6 +17,8 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { CasesService } from './cases.service';
+import { AddCommentDto } from './dto/add-comment.dto';
+import { AddNoteDto } from './dto/add-note.dto';
 import { CreateCaseDto } from './dto/create-case.dto';
 import { LinkAlertDto } from './dto/link-alert.dto';
 import { ListCasesQueryDto } from './dto/list-cases-query.dto';
@@ -64,6 +66,24 @@ export class CasesController {
     @Body() dto: LinkAlertDto,
   ) {
     return this.casesService.linkAlert(actor, id, dto);
+  }
+
+  @Post(':id/notes')
+  addNote(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: AddNoteDto,
+  ) {
+    return this.casesService.addNote(actor, id, dto);
+  }
+
+  @Post(':id/comments')
+  addComment(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id') id: string,
+    @Body() dto: AddCommentDto,
+  ) {
+    return this.casesService.addComment(actor, id, dto);
   }
 
   // Reassignment is a plain attribute change, not a lifecycle transition

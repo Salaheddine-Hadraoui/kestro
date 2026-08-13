@@ -261,6 +261,8 @@ describe('Evidence (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -272,13 +274,13 @@ describe('Evidence (e2e)', () => {
 
     const [analystLogin, otherAnalystLogin, leadLogin] = await Promise.all([
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: otherAnalyst.email, password: 'analyst2-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: lead.email, password: 'lead-password' }),
     ]);
     analystToken = (analystLogin.body as { accessToken: string }).accessToken;
@@ -287,7 +289,7 @@ describe('Evidence (e2e)', () => {
     leadToken = (leadLogin.body as { accessToken: string }).accessToken;
 
     const created = await request(app.getHttpServer())
-      .post('/cases')
+      .post('/v1/cases')
       .set('Authorization', `Bearer ${analystToken}`)
       .send({ title: 'Suspicious activity', severity: Severity.high });
     caseId = (created.body as { id: string }).id;
@@ -307,7 +309,7 @@ describe('Evidence (e2e)', () => {
   describe('POST /cases/:caseId/evidence', () => {
     it('adds evidence on an accessible case', async () => {
       const response = await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send(validEvidence)
         .expect(201);
@@ -322,7 +324,7 @@ describe('Evidence (e2e)', () => {
 
     it("forbids an Analyst from adding evidence to a case they aren't assigned to", async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${otherAnalystToken}`)
         .send(validEvidence)
         .expect(403);
@@ -330,14 +332,14 @@ describe('Evidence (e2e)', () => {
 
     it('requires authentication', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .send(validEvidence)
         .expect(401);
     });
 
     it('rejects a malformed body', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ type: 'LOG', source: 'firewall' })
         .expect(400);
@@ -345,7 +347,7 @@ describe('Evidence (e2e)', () => {
 
     it('rejects an invalid timestamp', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ ...validEvidence, timestamp: 'not-a-date' })
         .expect(400);
@@ -355,16 +357,16 @@ describe('Evidence (e2e)', () => {
   describe('GET /cases/:caseId/evidence', () => {
     it('lists evidence for the case', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send(validEvidence);
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${leadToken}`)
         .send({ ...validEvidence, source: 'edr' });
 
       const response = await request(app.getHttpServer())
-        .get(`/cases/${caseId}/evidence`)
+        .get(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -373,7 +375,7 @@ describe('Evidence (e2e)', () => {
 
     it("forbids an Analyst from listing evidence on a case they aren't assigned to", async () => {
       await request(app.getHttpServer())
-        .get(`/cases/${caseId}/evidence`)
+        .get(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${otherAnalystToken}`)
         .expect(403);
     });
@@ -382,7 +384,7 @@ describe('Evidence (e2e)', () => {
   describe('GET /cases/:caseId/evidence/:evidenceId', () => {
     it('returns 404 for an unknown evidence id', async () => {
       await request(app.getHttpServer())
-        .get(`/cases/${caseId}/evidence/does-not-exist`)
+        .get(`/v1/cases/${caseId}/evidence/does-not-exist`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(404);
     });
@@ -395,7 +397,7 @@ describe('Evidence (e2e)', () => {
         extra: Record<string, unknown> = {},
       ) =>
         request(app.getHttpServer())
-          .post(`/cases/${caseId}/transitions`)
+          .post(`/v1/cases/${caseId}/transitions`)
           .set('Authorization', `Bearer ${analystToken}`)
           .send({ action, ...extra });
 
@@ -408,7 +410,7 @@ describe('Evidence (e2e)', () => {
       );
 
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send(validEvidence)
         .expect(409);

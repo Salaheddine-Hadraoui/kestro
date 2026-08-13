@@ -27,11 +27,22 @@ With Timeline's read API now in place, every module named in Milestone 1
 read-back path. Milestone 1 is now fully closed, including its
 previously-open Timeline gap.
 
+A Milestone 1 readiness audit was then run against checkpoint `20d5894`
+(read-only; findings only, no code changes). It found the core
+implementation solid — schema, transactions, the case state machine, and
+visibility scoping all matched the docs, with 177 tests passing — but
+surfaced three must-fix process/completeness gaps and one confirmed
+security bug. A **hardening pass** addressed all four (see "Milestone 1
+hardening pass" below) before any further feature milestone begins.
+
 ## Current checkpoint
 
-- Git: `8b29089` on `main` (pushed to origin) — Evidence module.
-- Timeline module implemented and verified on top of that; commit pending
-  as of this writing (see below).
+- Git: `20d5894` on `main` — Timeline read API; this is the checkpoint the
+  readiness audit ran against and the hardening pass below was built on.
+- Hardening pass (CLAUDE.md/PROGRESS.md reconciliation, `/v1` versioning,
+  Notes/Comments, refresh-token rotation fix) implemented and verified on
+  top of that; commit pending as of this writing (see "Chronological change
+  history" below).
 
 ## Module status
 
@@ -41,11 +52,25 @@ previously-open Timeline gap.
 | Auth | Done | JWT access/refresh, refresh-token rotation + revocation, RolesGuard infra |
 | Users | Done | CRUD, Lead-gated management, soft-delete (`disabledAt`) |
 | Alerts | Done | create/list/get/dismiss; case-linking explicitly deferred (now resolved by Cases) |
-| Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping. Zero schema changes beyond Milestone-1 foundation. |
+| Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping, freeform notes and comments (hardening pass). Zero schema changes beyond Milestone-1 foundation. |
 | Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. |
 | Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. |
 | Timeline | Done | `GET /cases/:caseId/timeline`, read-only, nested under a case; reuses Cases' visibility check; paginated (`limit`/`offset`), deterministic chronological order, author joined in one query; zero schema changes — the Milestone-1 foundation's `timeline_events` table and existing indexes already supported this. |
 | Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
+
+## Milestone 1 hardening pass
+
+Run against checkpoint `20d5894`, in direct response to the readiness audit
+run at that same checkpoint. Four required fixes, in scope order:
+
+1. **CLAUDE.md / PROGRESS.md consistency** — CLAUDE.md still said Investigations/Hypotheses were "not implemented yet" and warned against scaffolding them, even though the Investigations module (see above) had already shipped. Updated CLAUDE.md's Status, module-structure, and domain-model sections to reflect that Investigations/Hypotheses is real and implemented (Phase 1), while keeping the still-genuinely-open item (Hypothesis↔Evidence linking) marked as unscoped. PROGRESS.md's own history was left as-is other than this entry and the checkpoint/next-milestone bookkeeping — it was already accurate, per the audit.
+2. **API versioning** — `app.setGlobalPrefix('v1', { exclude: ['health'] })` added in `main.ts`. `/health` is excluded deliberately: it's a liveness probe (infrastructure plumbing), not a versioned business-API route. Every e2e test's bootstrap (which independently mirrors `main.ts`'s setup rather than importing it) got the same call, and every existing route assertion across all 8 e2e spec files was updated to the `/v1/...` path. No `/v2` or generic versioning framework introduced — a single static prefix is all today's requirement justifies.
+3. **Notes/Comments** — implemented as two thin endpoints on the existing Cases module, `POST /cases/:id/notes` and `POST /cases/:id/comments`, each writing directly to `timeline_events` (`note` / `comment` types, both already reserved in the schema's `TimelineEventType` enum since Milestone 1 but never used until now). No new table: a note or comment has no fields beyond its content, so the existing append-only timeline architecture is the correct model as-is, per docs/WORKFLOW.md steps 4–5. Reuses the same visibility (`assertCanAccess`) and "resolved case rejects new activity" (409) rules already applied to evidence, alerts, and hypotheses. Because `note` is already overloaded for system-generated entries (`assignee_changed`, `hypothesis_*`), a human-authored note carries its own `event: 'note_added'` discriminator in `content`; `comment` has exactly one meaning so far and needs none.
+4. **Refresh-token rotation race condition** — confirmed genuinely exploitable, not just theoretical: a regression test firing two concurrent `refresh()` calls with the same not-yet-revoked token showed both calls succeeding and minting two independent valid token pairs from a single-use token, under the pre-fix code. Fixed with the smallest sound change — replaced the unconditional `refreshToken.update(...)` revoke with the same atomic, conditional `updateMany({ where: { id, revokedAt: null } })` pattern `logout()` already used, rejecting with `UnauthorizedException` when the update affects zero rows. No change to token shapes, TTLs, or the overall auth flow.
+
+**Verification**: `prisma validate` clean; `tsc --noEmit` clean; `eslint --fix` clean; unit tests 113/113 passing (was 104; +9 for the race regression test and the 8 new addNote/addComment cases); e2e tests 85/85 passing (was 73; +12 for Notes/Comments authorization/validation/resolved-case coverage, plus the existing cross-module timeline test extended to cover both new event types); `nest build` clean. Real-DB verification was done against the dedicated `kestro-postgres-dev` container (not just the Jest-mocked Prisma the rest of the suite uses): `prisma migrate status` confirmed no drift (this pass made no schema changes), then the compiled app was booted against it, exercised end-to-end over real HTTP (login, case creation, `/v1/cases/:id/notes`, `/v1/cases/:id/comments`, `GET /v1/cases/:id/timeline`, plus confirming `/health` still resolves unprefixed while `/v1/health` correctly 404s) with a throwaway user/case/timeline rows, then torn back down to leave the dev DB exactly as it was found. This also incidentally confirmed the `comment` enum value — reserved in the schema since Milestone 1 but never exercised by any code path until this pass — round-trips through real Postgres correctly.
+
+**Findings not addressed in this pass**: per explicit scope instruction, the audit's "should fix soon" (B-tier) findings were deliberately left untouched and are recorded under "Known technical debt" below rather than fixed opportunistically.
 
 ## Key architectural/domain decisions already made
 
@@ -85,34 +110,43 @@ previously-open Timeline gap.
 - **Timeline reuses `CasesService.findOne` for visibility**, identical to Investigations' and Evidence's pattern — Analyst must be the case's assignee, Lead always allowed. No new authorization logic.
 - **Timeline is paginated (`limit`/`offset`, default 25, max 100)** rather than returning the full history in one response — same shape as Cases' list endpoint, and necessary since a case's timeline grows unbounded over its lifetime.
 - **No N+1 on the author join**: `findMany({ include: { author: ... } })` is a single query pattern that Prisma is left to batch — confirmed via `EXPLAIN` that the `caseId` filter still hits the existing `timeline_events(case_id, created_at)` composite index from the Milestone-1 foundation schema; no new index was needed.
+- **API versioning is a single static `/v1` prefix** (`app.setGlobalPrefix('v1', { exclude: ['health'] })`), not Nest's built-in URI-versioning system — nothing today needs multiple simultaneously-served versions, so the simpler mechanism is the correct one; do not introduce `/v2` or a versioning framework without a concrete requirement.
+- **Notes and comments have no dedicated table** — both are pure `timeline_events` rows (`note` / `comment` types) created via `POST /cases/:id/notes` and `POST /cases/:id/comments` on the existing Cases module, not a new module. A human-authored note's `content` carries an `event: 'note_added'` discriminator (the `note` type is already overloaded for system-generated entries); `comment` needed none, being new and single-purpose.
+- **Refresh-token revocation is now conditional, not unconditional**: `refresh()`'s revoke step uses `updateMany({ where: { id, revokedAt: null } })` (same pattern as `logout()`) instead of a plain `update()`, so two concurrent requests racing the same not-yet-revoked token can't both succeed — closes a confirmed (regression-tested) race that let a single-use refresh token mint two valid sessions.
 
 ## Important decisions still pending
 
-- **API versioning**: docs/ARCHITECTURE.md says "REST (versioned, JSON)" but no version prefix exists on any route. Flagged five times now as a pre-existing gap, not yet resolved.
 - **Alert creation has no actor field** (`createdById`) — docs/SECURITY.md's audit list names dismissal and linking, not creation, and docs/ARCHITECTURE.md's alerts table doesn't include one. Left as-is; worth confirming this is intentional rather than a doc oversight.
 - **`VERIFYING → MITIGATING` loop-back** and **alert-linkable-to-multiple-cases** — both explicitly open in docs/ROADMAP.md, unaffected by anything built so far.
-- **Hypothesis↔Evidence linking design** — explicitly re-confirmed as deferred (see decisions above); the exact shape (nullable FK vs. join table) isn't decided.
-- **Phase 1's other named items** (comments/@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) remain fully unscoped.
+- **Hypothesis↔Evidence linking design** — explicitly re-confirmed as deferred (see decisions above); the exact shape (nullable FK vs. join table) isn't decided. This is the leading candidate for the next milestone (see below).
+- **Phase 1's other named items** (@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) remain fully unscoped. Comments themselves are no longer on this list — see the hardening pass above.
 
 ## Current task
 
-Timeline module implementation is complete and verified (see below); commit pending as of this writing. This closes Milestone 1 in full.
+Milestone 1 hardening pass is complete and verified (see above); commit pending as of this writing. Not yet started: Hypothesis↔Evidence linking (see "Next planned milestone").
 
 ## Next planned milestone
 
-Not yet decided. Candidates carried over from earlier milestones: revisit Hypothesis↔Evidence linking now that both sides exist; resolve the still-open API versioning gap; or pick up one of Phase 1's other named items (comments/@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md), none of which are scoped yet.
+**Hypothesis↔Evidence linking.** Both sides of this relationship now exist independently and are well-tested (Investigations and Evidence, both shipped in earlier milestones); this is the natural completion of docs/PRODUCT.md's `Investigation → Hypotheses → Evidence → Validation → Conclusion` chain, doesn't require scoping a brand-new module (unlike Playbooks/Knowledge/AI, all still explicitly unscoped per CLAUDE.md), and has been carried as an open decision across three prior milestone entries. Not started as of this writing.
 
 ## Known technical debt / limitations / follow-ups
 
-- No pagination on `GET /users` (fine at current team-size assumptions per docs/PRODUCT.md; revisit if that changes).
+- No pagination on `GET /users` (fine at current team-size assumptions per docs/PRODUCT.md; revisit if that changes) — also inconsistent with Cases/Timeline's `{data, total, limit, offset}` envelope; decide one way or the other before more list endpoints accumulate.
 - No "logout all sessions" endpoint — refresh tokens revoke individually.
 - No re-enable-only endpoint for users beyond `PATCH .../{disabled:false}`.
 - `rawPayload` size limits on Alerts rely on Express's default body-parser cap; not explicitly configured.
-- No API version prefix (see "pending decisions" above).
 - `CasesService.assertAlertsLinkable` validates alerts one at a time in a loop (N queries for N alertIds at case creation) rather than a single batched query — fine at Milestone-1 scale, worth revisiting if bulk alert-linking at creation becomes common.
-- No Hypothesis↔Evidence linking (see "pending decisions" above).
+- No Hypothesis↔Evidence linking (see "pending decisions" above; now the next planned milestone).
 - No re-opening of a validated/rejected hypothesis if the conclusion later turns out wrong — would currently require proposing a fresh hypothesis instead.
 - No evidence update/delete — intentional (append-only), but means a genuine data-entry mistake in evidence can only be superseded by new evidence, never corrected in place.
+- `CasesService.reassign` doesn't call the shared `assertCanAccess` visibility check — harmless today since only Leads (who see every case) can reach it via `RolesGuard`, but it's an implicit invariant rather than an enforced one. From the readiness audit; deliberately not fixed in the hardening pass (scoped to the four required items only).
+- No `ParseUUIDPipe` (or equivalent) on path params anywhere in the app — a malformed case/user/alert id reaches Postgres raw and the generic exception filter turns the resulting driver error into a 500 instead of a 400. From the readiness audit; deferred.
+- Alert-linking has a TOCTOU: `assertAlertsLinkable` runs outside the write transaction, so a race between two concurrent link requests is only caught by the DB's unique constraint on `case_alerts.alert_id`, and the resulting `P2002` isn't mapped to a 409 — it surfaces as a 500. From the readiness audit; deferred.
+- Timeline's append-only guarantee is enforced only in application code (no update/delete endpoints exist); docs/SECURITY.md's DB-grant-level backstop (revoking `UPDATE`/`DELETE` on `timeline_events` from the app's own DB role) was never added via migration. From the readiness audit; deferred.
+- No CI pipeline and no enforced coverage threshold — all 198 tests pass locally as of this writing, but nothing gates a regression from merging. From the readiness audit; deferred.
+- The "verify real DB behavior via manual psql smoke-testing" step (see Test strategy above) has no committed script or checklist — it's repeatable in principle but not in practice. This hardening pass's own real-DB verification (see above) was ad hoc for the same reason; turning it into a committed script is still outstanding. From the readiness audit; deferred.
+- `.env.example` doesn't document `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `DATABASE_URL`, `CORS_ORIGIN`, or `PORT`, all of which `environment-variables.ts` actually requires at boot. From the readiness audit; deferred.
+- No rate limiting on `/auth/login` — acceptable with no external/production exposure yet, but must land before any internet-facing deployment. From the readiness audit; deferred.
 
 ## Chronological change history
 
@@ -128,4 +162,5 @@ Not yet decided. Candidates carried over from earlier milestones: revisit Hypoth
 | `86fbf4b` | Cases module: full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping — zero schema changes |
 | `28aa8a7` | Investigations module: Hypothesis propose/validate/reject nested under a case; new `hypotheses` table + `hypothesis_status` enum; reuses Cases' visibility rule; Phase 1 begun per docs/ROADMAP.md's own sequencing |
 | `8b29089` | Evidence module: text-based evidence create/list/get nested under a case, each writing a matching `evidence_added` timeline event; zero schema changes — the Milestone-1 foundation schema already had the complete `evidence` table |
-| _(pending)_ | Timeline module: `GET /cases/:caseId/timeline` read-side API, paginated, deterministic order, author joined, reusing Cases' visibility rule; zero schema changes; closes Milestone 1 |
+| `20d5894` | Timeline module: `GET /cases/:caseId/timeline` read-side API, paginated, deterministic order, author joined, reusing Cases' visibility rule; zero schema changes; closes Milestone 1 |
+| _(pending)_ | Milestone 1 hardening pass: CLAUDE.md/PROGRESS.md reconciliation, `/v1` API versioning, Notes/Comments (`POST /cases/:id/notes`\|`/comments`), refresh-token rotation race fix — see "Milestone 1 hardening pass" above |

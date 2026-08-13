@@ -240,6 +240,38 @@ describe('AuthService', () => {
       ).rejects.toBeInstanceOf(UnauthorizedException);
     });
 
+    it('prevents concurrent reuse of the same refresh token from minting two token pairs', async () => {
+      const { service, refreshTokens } = createService();
+
+      const { refreshToken } = await service.login({
+        email: 'analyst@kestro.test',
+        password: 'correct-password',
+      });
+
+      // Two requests race to rotate the same still-valid refresh token (e.g.
+      // a replayed/stolen token racing the legitimate client). Exactly one
+      // may succeed; the other must be rejected, not silently issue a second
+      // valid session from a single-use token.
+      const [first, second] = await Promise.allSettled([
+        service.refresh({ refreshToken }),
+        service.refresh({ refreshToken }),
+      ]);
+
+      const settled = [first, second];
+      const fulfilled = settled.filter((r) => r.status === 'fulfilled');
+      const rejected = settled.filter((r) => r.status === 'rejected');
+
+      expect(fulfilled).toHaveLength(1);
+      expect(rejected).toHaveLength(1);
+      expect(rejected[0].reason).toBeInstanceOf(UnauthorizedException);
+
+      // Only one new refresh token should have been minted from this race.
+      const nonRevoked = [...refreshTokens.values()].filter(
+        (row) => row.revokedAt === null,
+      );
+      expect(nonRevoked).toHaveLength(1);
+    });
+
     it('rejects a valid refresh token belonging to a now-disabled user', async () => {
       const { service, users } = createService();
 

@@ -192,6 +192,8 @@ describe('Users (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -203,10 +205,10 @@ describe('Users (e2e)', () => {
 
     const [analystLogin, leadLogin] = await Promise.all([
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: lead.email, password: 'lead-password' }),
     ]);
     analystToken = (analystLogin.body as { accessToken: string }).accessToken;
@@ -220,7 +222,7 @@ describe('Users (e2e)', () => {
   describe('POST /users', () => {
     it('allows a Lead to create a user', async () => {
       const response = await request(app.getHttpServer())
-        .post('/users')
+        .post('/v1/users')
         .set('Authorization', `Bearer ${leadToken}`)
         .send({
           email: 'new@kestro.test',
@@ -240,7 +242,7 @@ describe('Users (e2e)', () => {
 
     it('forbids an Analyst from creating a user', async () => {
       await request(app.getHttpServer())
-        .post('/users')
+        .post('/v1/users')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({
           email: 'new@kestro.test',
@@ -253,7 +255,7 @@ describe('Users (e2e)', () => {
 
     it('requires authentication', async () => {
       await request(app.getHttpServer())
-        .post('/users')
+        .post('/v1/users')
         .send({
           email: 'new@kestro.test',
           password: 'new-password-123',
@@ -267,7 +269,7 @@ describe('Users (e2e)', () => {
   describe('GET /users', () => {
     it('lists users for any authenticated role, never including passwordHash', async () => {
       const response = await request(app.getHttpServer())
-        .get('/users')
+        .get('/v1/users')
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -280,7 +282,7 @@ describe('Users (e2e)', () => {
   describe('GET /users/:id', () => {
     it('returns 404 for an unknown id', async () => {
       await request(app.getHttpServer())
-        .get('/users/does-not-exist')
+        .get('/v1/users/does-not-exist')
         .set('Authorization', `Bearer ${leadToken}`)
         .expect(404);
     });
@@ -289,7 +291,7 @@ describe('Users (e2e)', () => {
   describe('PATCH /users/:id', () => {
     it('allows a user to update their own name', async () => {
       const response = await request(app.getHttpServer())
-        .patch(`/users/${analyst.id}`)
+        .patch(`/v1/users/${analyst.id}`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ name: 'Renamed Analyst' })
         .expect(200);
@@ -300,7 +302,7 @@ describe('Users (e2e)', () => {
 
     it('rejects a self password change with the wrong current password', async () => {
       await request(app.getHttpServer())
-        .patch(`/users/${analyst.id}`)
+        .patch(`/v1/users/${analyst.id}`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ password: 'new-password-123', currentPassword: 'wrong' })
         .expect(401);
@@ -308,7 +310,7 @@ describe('Users (e2e)', () => {
 
     it('forbids an Analyst from editing another user', async () => {
       await request(app.getHttpServer())
-        .patch(`/users/${lead.id}`)
+        .patch(`/v1/users/${lead.id}`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ name: 'Hijacked' })
         .expect(403);
@@ -316,7 +318,7 @@ describe('Users (e2e)', () => {
 
     it("allows a Lead to change another user's role", async () => {
       const response = await request(app.getHttpServer())
-        .patch(`/users/${analyst.id}`)
+        .patch(`/v1/users/${analyst.id}`)
         .set('Authorization', `Bearer ${leadToken}`)
         .send({ role: UserRole.lead })
         .expect(200);
@@ -329,26 +331,26 @@ describe('Users (e2e)', () => {
   describe('DELETE /users/:id', () => {
     it('allows a Lead to disable another user, blocking subsequent login', async () => {
       await request(app.getHttpServer())
-        .delete(`/users/${analyst.id}`)
+        .delete(`/v1/users/${analyst.id}`)
         .set('Authorization', `Bearer ${leadToken}`)
         .expect(204);
 
       await request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' })
         .expect(401);
     });
 
     it('forbids an Analyst from deleting another user', async () => {
       await request(app.getHttpServer())
-        .delete(`/users/${lead.id}`)
+        .delete(`/v1/users/${lead.id}`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(403);
     });
 
     it('rejects a Lead attempting to delete their own account', async () => {
       await request(app.getHttpServer())
-        .delete(`/users/${lead.id}`)
+        .delete(`/v1/users/${lead.id}`)
         .set('Authorization', `Bearer ${leadToken}`)
         .expect(409);
     });

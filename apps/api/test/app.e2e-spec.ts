@@ -25,6 +25,8 @@ describe('Health (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     await app.init();
   });
 

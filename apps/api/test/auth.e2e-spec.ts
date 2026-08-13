@@ -128,6 +128,7 @@ describe('Auth (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     // Mirrors main.ts's bootstrap(), which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -144,7 +145,7 @@ describe('Auth (e2e)', () => {
 
   it('logs in with valid credentials and returns tokens + user (no password hash)', async () => {
     const response = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/v1/auth/login')
       .send(credentials)
       .expect(200);
 
@@ -164,31 +165,31 @@ describe('Auth (e2e)', () => {
 
   it('rejects an invalid password', async () => {
     await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/v1/auth/login')
       .send({ email: credentials.email, password: 'wrong' })
       .expect(401);
   });
 
   it('rejects a malformed login body', async () => {
     await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/v1/auth/login')
       .send({ email: 'not-an-email' })
       .expect(400);
   });
 
   it('GET /auth/me requires authentication', async () => {
-    await request(app.getHttpServer()).get('/auth/me').expect(401);
+    await request(app.getHttpServer()).get('/v1/auth/me').expect(401);
   });
 
   it('GET /auth/me returns the current user for a valid access token', async () => {
     const login = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/v1/auth/login')
       .send(credentials)
       .expect(200);
     const loginBody = login.body as { accessToken: string };
 
     const response = await request(app.getHttpServer())
-      .get('/auth/me')
+      .get('/v1/auth/me')
       .set('Authorization', `Bearer ${loginBody.accessToken}`)
       .expect(200);
 
@@ -200,20 +201,20 @@ describe('Auth (e2e)', () => {
 
   it('rejects /auth/me with a garbage bearer token', async () => {
     await request(app.getHttpServer())
-      .get('/auth/me')
+      .get('/v1/auth/me')
       .set('Authorization', 'Bearer not-a-real-token')
       .expect(401);
   });
 
   it('rotates the refresh token on /auth/refresh and rejects the old one on reuse', async () => {
     const login = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/v1/auth/login')
       .send(credentials)
       .expect(200);
     const loginBody = login.body as { refreshToken: string };
 
     const refreshed = await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/v1/auth/refresh')
       .send({ refreshToken: loginBody.refreshToken })
       .expect(200);
     const refreshedBody = refreshed.body as { refreshToken: string };
@@ -221,25 +222,25 @@ describe('Auth (e2e)', () => {
     expect(refreshedBody.refreshToken).not.toBe(loginBody.refreshToken);
 
     await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/v1/auth/refresh')
       .send({ refreshToken: loginBody.refreshToken })
       .expect(401);
   });
 
   it('revokes the refresh token on /auth/logout', async () => {
     const login = await request(app.getHttpServer())
-      .post('/auth/login')
+      .post('/v1/auth/login')
       .send(credentials)
       .expect(200);
     const loginBody = login.body as { refreshToken: string };
 
     await request(app.getHttpServer())
-      .post('/auth/logout')
+      .post('/v1/auth/logout')
       .send({ refreshToken: loginBody.refreshToken })
       .expect(204);
 
     await request(app.getHttpServer())
-      .post('/auth/refresh')
+      .post('/v1/auth/refresh')
       .send({ refreshToken: loginBody.refreshToken })
       .expect(401);
   });

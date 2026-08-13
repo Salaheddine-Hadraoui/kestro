@@ -609,4 +609,121 @@ describe('CasesService', () => {
       ).rejects.toBeInstanceOf(NotFoundException);
     });
   });
+
+  describe('addNote', () => {
+    it('records a note-typed timeline event for the assignee', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set('c', makeCase({ id: 'c', assigneeId: 'analyst-1' }));
+      const service = new CasesService(mock.prisma);
+
+      const result = await service.addNote(analyst, 'c', {
+        content: 'Pivoted through the jump host at 10.0.0.5',
+      });
+
+      expect(result).toMatchObject({
+        caseId: 'c',
+        type: 'note',
+        authorId: analyst.userId,
+      });
+      expect(result.content).toMatchObject({
+        event: 'note_added',
+        text: 'Pivoted through the jump host at 10.0.0.5',
+      });
+    });
+
+    it('allows a Lead to add a note on any case', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set('c', makeCase({ id: 'c', assigneeId: 'analyst-1' }));
+      const service = new CasesService(mock.prisma);
+
+      await expect(
+        service.addNote(lead, 'c', { content: 'Escalation review note' }),
+      ).resolves.toMatchObject({ type: 'note' });
+    });
+
+    it('forbids an Analyst from adding a note on a case they are not assigned to', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set('c', makeCase({ id: 'c', assigneeId: 'analyst-1' }));
+      const service = new CasesService(mock.prisma);
+
+      await expect(
+        service.addNote(otherAnalyst, 'c', { content: 'Not my case' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects adding a note to a resolved case', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set(
+        'c',
+        makeCase({
+          id: 'c',
+          assigneeId: 'analyst-1',
+          status: CaseStatus.RESOLVED,
+          resolutionSummary: 'Fixed',
+        }),
+      );
+      const service = new CasesService(mock.prisma);
+
+      await expect(
+        service.addNote(analyst, 'c', { content: 'Too late' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('404s for a case that does not exist', async () => {
+      const { service } = createService();
+
+      await expect(
+        service.addNote(analyst, 'does-not-exist', { content: 'x' }),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('addComment', () => {
+    it('records a comment-typed timeline event', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set('c', makeCase({ id: 'c', assigneeId: 'analyst-1' }));
+      const service = new CasesService(mock.prisma);
+
+      const result = await service.addComment(analyst, 'c', {
+        content: 'Can someone double-check the timeline on this?',
+      });
+
+      expect(result).toMatchObject({
+        caseId: 'c',
+        type: 'comment',
+        authorId: analyst.userId,
+      });
+      expect(result.content).toMatchObject({
+        text: 'Can someone double-check the timeline on this?',
+      });
+    });
+
+    it('forbids an Analyst from commenting on a case they are not assigned to', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set('c', makeCase({ id: 'c', assigneeId: 'analyst-1' }));
+      const service = new CasesService(mock.prisma);
+
+      await expect(
+        service.addComment(otherAnalyst, 'c', { content: 'Not my case' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+    });
+
+    it('rejects commenting on a resolved case', async () => {
+      const mock = createPrismaMock({ users: activeUsers });
+      mock.cases.set(
+        'c',
+        makeCase({
+          id: 'c',
+          assigneeId: 'analyst-1',
+          status: CaseStatus.RESOLVED,
+          resolutionSummary: 'Fixed',
+        }),
+      );
+      const service = new CasesService(mock.prisma);
+
+      await expect(
+        service.addComment(analyst, 'c', { content: 'Too late' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+  });
 });

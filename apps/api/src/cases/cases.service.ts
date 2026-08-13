@@ -5,7 +5,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type { Case, Prisma } from '../../generated/prisma/client';
+import type {
+  Case,
+  Prisma,
+  TimelineEvent,
+} from '../../generated/prisma/client';
 import {
   AlertStatus,
   CaseStatus,
@@ -13,6 +17,8 @@ import {
 } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
 import { PrismaService } from '../prisma/prisma.service';
+import type { AddCommentDto } from './dto/add-comment.dto';
+import type { AddNoteDto } from './dto/add-note.dto';
 import type { CreateCaseDto } from './dto/create-case.dto';
 import type { LinkAlertDto } from './dto/link-alert.dto';
 import type { ListCasesQueryDto } from './dto/list-cases-query.dto';
@@ -235,6 +241,53 @@ export class CasesService {
     });
 
     return this.withAlerts(updated);
+  }
+
+  // Freeform investigation note (docs/WORKFLOW.md step 4) — a `note`-typed
+  // timeline event. The `note` type is already overloaded for
+  // system-generated entries (assignee_changed, hypothesis_*), so a
+  // human-authored note carries its own `event` discriminator to stay
+  // distinguishable from those.
+  async addNote(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: AddNoteDto,
+  ): Promise<TimelineEvent> {
+    return this.addTimelineEntry(actor, id, 'note', {
+      event: 'note_added',
+      text: dto.content,
+    });
+  }
+
+  // Case collaboration (docs/WORKFLOW.md step 5) — a `comment`-typed
+  // timeline event. Unlike `note`, `comment` has exactly one meaning, so no
+  // discriminator is needed.
+  async addComment(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: AddCommentDto,
+  ): Promise<TimelineEvent> {
+    return this.addTimelineEntry(actor, id, 'comment', {
+      text: dto.content,
+    });
+  }
+
+  private async addTimelineEntry(
+    actor: AuthenticatedUser,
+    id: string,
+    type: 'note' | 'comment',
+    content: Prisma.InputJsonValue,
+  ): Promise<TimelineEvent> {
+    const kase = await this.findCaseOrThrow(id);
+    this.assertCanAccess(actor, kase);
+
+    if (kase.status === CaseStatus.RESOLVED) {
+      throw new ConflictException(`Cannot add a ${type} to a resolved case`);
+    }
+
+    return this.prisma.timelineEvent.create({
+      data: { caseId: id, type, authorId: actor.userId, content },
+    });
   }
 
   private async resolveAssigneeForCreate(

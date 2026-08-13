@@ -15,6 +15,11 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // docs/ARCHITECTURE.md commits to "REST (versioned, JSON)". /health is
+  // excluded: it's infrastructure plumbing (liveness probes), not a
+  // versioned business-API route.
+  app.setGlobalPrefix('v1', { exclude: ['health'] });
+
   app.useGlobalPipes(
     new ValidationPipe({
       whitelist: true,

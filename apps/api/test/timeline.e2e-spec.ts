@@ -418,6 +418,8 @@ describe('Timeline (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -429,13 +431,13 @@ describe('Timeline (e2e)', () => {
 
     const [analystLogin, otherAnalystLogin, leadLogin] = await Promise.all([
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: otherAnalyst.email, password: 'analyst2-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: lead.email, password: 'lead-password' }),
     ]);
     analystToken = (analystLogin.body as { accessToken: string }).accessToken;
@@ -444,7 +446,7 @@ describe('Timeline (e2e)', () => {
     leadToken = (leadLogin.body as { accessToken: string }).accessToken;
 
     const created = await request(app.getHttpServer())
-      .post('/cases')
+      .post('/v1/cases')
       .set('Authorization', `Bearer ${analystToken}`)
       .send({ title: 'Suspicious activity', severity: Severity.high });
     caseId = (created.body as { id: string }).id;
@@ -457,13 +459,13 @@ describe('Timeline (e2e)', () => {
   describe('GET /cases/:caseId/timeline', () => {
     it('returns the full audit history across modules in chronological order', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/transitions`)
+        .post(`/v1/cases/${caseId}/transitions`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ action: 'begin_triage' })
         .expect(200);
 
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/evidence`)
+        .post(`/v1/cases/${caseId}/evidence`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({
           type: EvidenceType.LOG,
@@ -474,13 +476,25 @@ describe('Timeline (e2e)', () => {
         .expect(201);
 
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/hypotheses`)
+        .post(`/v1/cases/${caseId}/hypotheses`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ statement: 'Likely a compromised credential' })
         .expect(201);
 
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${caseId}/notes`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'Pivoted through the jump host at 10.0.0.5' })
+        .expect(201);
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${caseId}/comments`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'Can someone double-check the timeline on this?' })
+        .expect(201);
+
       const response = await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline`)
+        .get(`/v1/cases/${caseId}/timeline`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -497,12 +511,14 @@ describe('Timeline (e2e)', () => {
         offset: number;
       };
 
-      expect(body.total).toBe(4);
+      expect(body.total).toBe(6);
       expect(body.data.map((e) => e.type)).toEqual([
         'status_change', // case creation
         'status_change', // begin_triage
         'evidence_added',
         'note', // hypothesis_proposed
+        'note', // freeform investigation note
+        'comment',
       ]);
       // Chronological order is deterministic and non-decreasing.
       const timestamps = body.data.map((e) => new Date(e.createdAt).getTime());
@@ -512,11 +528,18 @@ describe('Timeline (e2e)', () => {
         name: 'Analyst One',
         role: UserRole.analyst,
       });
+      expect(body.data[4].content).toMatchObject({
+        event: 'note_added',
+        text: 'Pivoted through the jump host at 10.0.0.5',
+      });
+      expect(body.data[5].content).toMatchObject({
+        text: 'Can someone double-check the timeline on this?',
+      });
     });
 
     it('includes alert_linked events when alerts are linked at case creation', async () => {
       const alertResponse = await request(app.getHttpServer())
-        .post('/alerts')
+        .post('/v1/alerts')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({
           source: 'siem',
@@ -527,7 +550,7 @@ describe('Timeline (e2e)', () => {
       const alertId = (alertResponse.body as { id: string }).id;
 
       const caseWithAlert = await request(app.getHttpServer())
-        .post('/cases')
+        .post('/v1/cases')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({
           title: 'Case with alert',
@@ -538,7 +561,7 @@ describe('Timeline (e2e)', () => {
       const linkedCaseId = (caseWithAlert.body as { id: string }).id;
 
       const response = await request(app.getHttpServer())
-        .get(`/cases/${linkedCaseId}/timeline`)
+        .get(`/v1/cases/${linkedCaseId}/timeline`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -551,22 +574,22 @@ describe('Timeline (e2e)', () => {
 
     it('supports pagination via limit/offset', async () => {
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/transitions`)
+        .post(`/v1/cases/${caseId}/transitions`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ action: 'begin_triage' })
         .expect(200);
       await request(app.getHttpServer())
-        .post(`/cases/${caseId}/transitions`)
+        .post(`/v1/cases/${caseId}/transitions`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ action: 'start_investigation' })
         .expect(200);
 
       const page1 = await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline?limit=2&offset=0`)
+        .get(`/v1/cases/${caseId}/timeline?limit=2&offset=0`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
       const page2 = await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline?limit=2&offset=2`)
+        .get(`/v1/cases/${caseId}/timeline?limit=2&offset=2`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -587,34 +610,34 @@ describe('Timeline (e2e)', () => {
 
     it("forbids an Analyst from reading the timeline of a case they aren't assigned to", async () => {
       await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline`)
+        .get(`/v1/cases/${caseId}/timeline`)
         .set('Authorization', `Bearer ${otherAnalystToken}`)
         .expect(403);
     });
 
     it('allows a Lead to read the timeline of any case', async () => {
       await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline`)
+        .get(`/v1/cases/${caseId}/timeline`)
         .set('Authorization', `Bearer ${leadToken}`)
         .expect(200);
     });
 
     it('requires authentication', async () => {
       await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline`)
+        .get(`/v1/cases/${caseId}/timeline`)
         .expect(401);
     });
 
     it('returns 404 for an unknown case', async () => {
       await request(app.getHttpServer())
-        .get('/cases/does-not-exist/timeline')
+        .get('/v1/cases/does-not-exist/timeline')
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(404);
     });
 
     it('rejects an out-of-range limit', async () => {
       await request(app.getHttpServer())
-        .get(`/cases/${caseId}/timeline?limit=1000`)
+        .get(`/v1/cases/${caseId}/timeline?limit=1000`)
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(400);
     });

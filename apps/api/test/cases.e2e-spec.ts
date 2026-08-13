@@ -321,6 +321,8 @@ describe('Cases (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    // Mirrors main.ts's bootstrap() setGlobalPrefix call, which this test harness bypasses.
+    app.setGlobalPrefix('v1', { exclude: ['health'] });
     app.useGlobalPipes(
       new ValidationPipe({
         whitelist: true,
@@ -332,13 +334,13 @@ describe('Cases (e2e)', () => {
 
     const [analystLogin, otherAnalystLogin, leadLogin] = await Promise.all([
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: analyst.email, password: 'analyst-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: otherAnalyst.email, password: 'analyst2-password' }),
       request(app.getHttpServer())
-        .post('/auth/login')
+        .post('/v1/auth/login')
         .send({ email: lead.email, password: 'lead-password' }),
     ]);
     analystToken = (analystLogin.body as { accessToken: string }).accessToken;
@@ -354,7 +356,7 @@ describe('Cases (e2e)', () => {
 
   function createCase(token: string, body: Record<string, unknown> = {}) {
     return request(app.getHttpServer())
-      .post('/cases')
+      .post('/v1/cases')
       .set('Authorization', `Bearer ${token}`)
       .send({ title: 'Suspicious activity', severity: Severity.high, ...body });
   }
@@ -392,14 +394,14 @@ describe('Cases (e2e)', () => {
 
     it('requires authentication', async () => {
       await request(app.getHttpServer())
-        .post('/cases')
+        .post('/v1/cases')
         .send({ title: 'x', severity: Severity.low })
         .expect(401);
     });
 
     it('rejects a malformed body', async () => {
       await request(app.getHttpServer())
-        .post('/cases')
+        .post('/v1/cases')
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ title: 'x' })
         .expect(400);
@@ -412,7 +414,7 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .get(`/cases/${id}`)
+        .get(`/v1/cases/${id}`)
         .set('Authorization', `Bearer ${otherAnalystToken}`)
         .expect(403);
     });
@@ -422,7 +424,7 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .get(`/cases/${id}`)
+        .get(`/v1/cases/${id}`)
         .set('Authorization', `Bearer ${leadToken}`)
         .expect(200);
     });
@@ -432,7 +434,7 @@ describe('Cases (e2e)', () => {
       await createCase(otherAnalystToken).expect(201);
 
       const response = await request(app.getHttpServer())
-        .get('/cases')
+        .get('/v1/cases')
         .set('Authorization', `Bearer ${analystToken}`)
         .expect(200);
 
@@ -451,7 +453,7 @@ describe('Cases (e2e)', () => {
         extra: Record<string, unknown> = {},
       ) =>
         request(app.getHttpServer())
-          .post(`/cases/${id}/transitions`)
+          .post(`/v1/cases/${id}/transitions`)
           .set('Authorization', `Bearer ${analystToken}`)
           .send({ action, ...extra });
 
@@ -473,19 +475,19 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/cases/${id}/transitions`)
+        .post(`/v1/cases/${id}/transitions`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ action: 'begin_triage' })
         .expect(200);
 
       await request(app.getHttpServer())
-        .post(`/cases/${id}/transitions`)
+        .post(`/v1/cases/${id}/transitions`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ action: 'escalate' })
         .expect(200);
 
       const accepted = await request(app.getHttpServer())
-        .post(`/cases/${id}/transitions`)
+        .post(`/v1/cases/${id}/transitions`)
         .set('Authorization', `Bearer ${leadToken}`)
         .send({ action: 'accept_escalation' })
         .expect(200);
@@ -500,7 +502,7 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .post(`/cases/${id}/transitions`)
+        .post(`/v1/cases/${id}/transitions`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ action: 'resolve', resolutionSummary: 'too early' })
         .expect(409);
@@ -511,7 +513,7 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
       const transition = (action: string) =>
         request(app.getHttpServer())
-          .post(`/cases/${id}/transitions`)
+          .post(`/v1/cases/${id}/transitions`)
           .set('Authorization', `Bearer ${analystToken}`)
           .send({ action });
 
@@ -529,7 +531,7 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       const response = await request(app.getHttpServer())
-        .post(`/cases/${id}/alerts`)
+        .post(`/v1/cases/${id}/alerts`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ alertId: ALERT_1_ID })
         .expect(200);
@@ -545,7 +547,7 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       const response = await request(app.getHttpServer())
-        .patch(`/cases/${id}`)
+        .patch(`/v1/cases/${id}`)
         .set('Authorization', `Bearer ${leadToken}`)
         .send({ assigneeId: ANALYST_2_ID })
         .expect(200);
@@ -560,10 +562,186 @@ describe('Cases (e2e)', () => {
       const id = (created.body as { id: string }).id;
 
       await request(app.getHttpServer())
-        .patch(`/cases/${id}`)
+        .patch(`/v1/cases/${id}`)
         .set('Authorization', `Bearer ${analystToken}`)
         .send({ assigneeId: ANALYST_2_ID })
         .expect(403);
+    });
+  });
+
+  describe('POST /cases/:id/notes', () => {
+    it('records a note authored by the assignee', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      const response = await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'Pivoted through the jump host at 10.0.0.5' })
+        .expect(201);
+
+      const body = response.body as Record<string, unknown>;
+      expect(body).toMatchObject({
+        caseId: id,
+        type: 'note',
+        authorId: analystId,
+      });
+    });
+
+    it('allows a Lead to add a note on any case', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .set('Authorization', `Bearer ${leadToken}`)
+        .send({ content: 'Escalation review note' })
+        .expect(201);
+    });
+
+    it('requires authentication', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .send({ content: 'x' })
+        .expect(401);
+    });
+
+    it('forbids an Analyst from adding a note on a case they are not assigned to', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .set('Authorization', `Bearer ${otherAnalystToken}`)
+        .send({ content: 'Not my case' })
+        .expect(403);
+    });
+
+    it('rejects empty content', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: '' })
+        .expect(400);
+    });
+
+    it('rejects content over the length limit', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'x'.repeat(2001) })
+        .expect(400);
+    });
+
+    it('rejects adding a note to a resolved case', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+      const transition = (
+        action: string,
+        extra: Record<string, unknown> = {},
+      ) =>
+        request(app.getHttpServer())
+          .post(`/v1/cases/${id}/transitions`)
+          .set('Authorization', `Bearer ${analystToken}`)
+          .send({ action, ...extra });
+
+      await transition('begin_triage').expect(200);
+      await transition('start_investigation').expect(200);
+      await transition('begin_mitigation').expect(200);
+      await transition('begin_verification').expect(200);
+      await transition('resolve', { resolutionSummary: 'Fixed' }).expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/notes`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'Too late' })
+        .expect(409);
+    });
+  });
+
+  describe('POST /cases/:id/comments', () => {
+    it('records a comment', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      const response = await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/comments`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'Can someone double-check the timeline on this?' })
+        .expect(201);
+
+      const body = response.body as Record<string, unknown>;
+      expect(body).toMatchObject({
+        caseId: id,
+        type: 'comment',
+        authorId: analystId,
+      });
+    });
+
+    it('requires authentication', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/comments`)
+        .send({ content: 'x' })
+        .expect(401);
+    });
+
+    it('forbids an Analyst from commenting on a case they are not assigned to', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/comments`)
+        .set('Authorization', `Bearer ${otherAnalystToken}`)
+        .send({ content: 'Not my case' })
+        .expect(403);
+    });
+
+    it('rejects empty content', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/comments`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: '' })
+        .expect(400);
+    });
+
+    it('rejects commenting on a resolved case', async () => {
+      const created = await createCase(analystToken).expect(201);
+      const id = (created.body as { id: string }).id;
+      const transition = (
+        action: string,
+        extra: Record<string, unknown> = {},
+      ) =>
+        request(app.getHttpServer())
+          .post(`/v1/cases/${id}/transitions`)
+          .set('Authorization', `Bearer ${analystToken}`)
+          .send({ action, ...extra });
+
+      await transition('begin_triage').expect(200);
+      await transition('start_investigation').expect(200);
+      await transition('begin_mitigation').expect(200);
+      await transition('begin_verification').expect(200);
+      await transition('resolve', { resolutionSummary: 'Fixed' }).expect(200);
+
+      await request(app.getHttpServer())
+        .post(`/v1/cases/${id}/comments`)
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({ content: 'Too late' })
+        .expect(409);
     });
   });
 });
