@@ -98,6 +98,34 @@ Implements docs/PRODUCT.md's "evaluating hypotheses against Evidence" — the on
 
 **Deliberately deferred**: no unlink endpoint (see above); no way to link evidence to a hypothesis at creation time (only after, via the link endpoint — see API section); many-to-many (one evidence item to many hypotheses) was considered and explicitly rejected as unjustified by current docs, not merely postponed — revisit only if a real product need for it appears.
 
+## Phase 2 — Operations Workspace
+
+Phase 2 moves Kestro from a backend-only API (Milestone 1 + Phase 1's
+Investigations/Hypothesis-Evidence, all complete through commit `b616883`)
+into an actually-usable product. A read-only architecture review (see
+conversation history — not a committed doc) evaluated search/filter, case
+export, richer metrics, and remaining B-tier hardening against the
+alternative of building the frontend first, and concluded the frontend is
+the higher-value next step: none of the other candidates have any value
+without a UI to consume them.
+
+**Phase 2 — Milestone 1: Operations Workspace Foundation** (this milestone)
+builds the app shell only: Next.js authentication UI, a Next.js
+BFF/authentication boundary holding JWTs in httpOnly cookies (never exposed
+to browser JavaScript), protected workspace routing, a typed server-side
+API client with 401-triggered refresh-and-retry, a role-aware navigation
+foundation, and a loading/error/empty-state foundation. It deliberately
+does **not** implement Alerts, Cases, Dashboard, Investigation, Evidence,
+or Timeline UI — those are later Phase 2 milestones, sequenced onto this
+foundation once it exists.
+
+No backend changes: the existing Auth module's JSON-token contract
+(`POST /v1/auth/login|refresh|logout`, `GET /v1/auth/me`) is called exactly
+as built. See "Key architectural/domain decisions already made" below for
+the frontend-side decisions this milestone makes (cookie strategy, Server
+Actions vs. Route Handlers, feature-oriented folder structure, etc.), added
+once implementation completes.
+
 ## Key architectural/domain decisions already made
 
 - **Primary keys**: UUID across all Milestone 1 tables, `@default(uuid())` (client-side generation, not DB-side).
