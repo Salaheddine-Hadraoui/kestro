@@ -1,3 +1,4 @@
+/** @jest-environment node */
 jest.mock("./session", () => ({
   getAccessToken: jest.fn(),
   getRefreshToken: jest.fn(),
@@ -56,6 +57,23 @@ describe("apiFetch", () => {
       accessToken: "new-token",
       refreshToken: "new-refresh",
     });
+    expect(global.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("throws SessionExpiredError on a second 401 after successful refresh", async () => {
+    (getAccessToken as jest.Mock)
+      .mockResolvedValueOnce("expired-token")
+      .mockResolvedValueOnce("new-token");
+    (getRefreshToken as jest.Mock).mockResolvedValue("refresh-token");
+    (global.fetch as jest.Mock)
+      .mockResolvedValueOnce(jsonResponse(401, { statusCode: 401, message: "expired" }))
+      .mockResolvedValueOnce(
+        jsonResponse(200, { accessToken: "new-token", refreshToken: "new-refresh" }),
+      )
+      .mockResolvedValueOnce(jsonResponse(401, { statusCode: 401, message: "expired again" }));
+
+    await expect(apiFetch("/auth/me")).rejects.toBeInstanceOf(SessionExpiredError);
+    expect(clearSessionCookies).toHaveBeenCalled();
     expect(global.fetch).toHaveBeenCalledTimes(3);
   });
 
