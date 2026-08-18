@@ -18,13 +18,23 @@ describe("isTokenValid", () => {
     expect(isTokenValid("not-a-jwt")).toBe(false);
   });
 
-  it("returns true for a token whose exp is in the future", () => {
+  it("returns true for a token expiring well beyond the leeway window", () => {
     jest.useFakeTimers().setSystemTime(new Date(1_000_000 * 1000));
     expect(isTokenValid(makeFakeJwt(1_000_100))).toBe(true);
   });
 
-  it("returns false for a token whose exp is in the past", () => {
+  it("returns false for a token whose exp is already in the past", () => {
     jest.useFakeTimers().setSystemTime(new Date(1_000_000 * 1000));
     expect(isTokenValid(makeFakeJwt(999_900))).toBe(false);
+  });
+
+  it("returns false for a token expiring within the leeway window", () => {
+    jest.useFakeTimers().setSystemTime(new Date(1_000_000 * 1000));
+    expect(isTokenValid(makeFakeJwt(1_000_010), 30)).toBe(false);
+  });
+
+  it("returns false for a token whose exp exactly equals now", () => {
+    jest.useFakeTimers().setSystemTime(new Date(1_000_000 * 1000));
+    expect(isTokenValid(makeFakeJwt(1_000_000), 0)).toBe(false);
   });
 });

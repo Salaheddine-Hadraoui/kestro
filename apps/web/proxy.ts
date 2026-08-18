@@ -16,7 +16,10 @@ import type { AuthTokens } from "@/lib/api/types";
 // Next.js forbids writing cookies during Server Component rendering, and
 // refresh necessarily writes new cookies. verifySession() (calling
 // NestJS /auth/me) remains the only authoritative check; this proxy only
-// avoids bouncing a request whose refresh token is still perfectly valid.
+// avoids bouncing a request whose refresh token is still perfectly
+// valid. The one case this exp-only check can't catch -- a token that
+// looks unexpired but the backend rejects anyway -- is handled by
+// app/session-expired/route.ts, reached via verifySession()'s redirect.
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
@@ -26,6 +29,23 @@ export async function proxy(request: NextRequest) {
     return isPublicPath(pathname)
       ? NextResponse.redirect(new URL("/", request.url))
       : NextResponse.next();
+  }
+
+  // Background prefetch/RSC requests (e.g. Next.js prefetching a <Link>
+  // in the viewport) must not drive session-lifecycle side effects.
+  // Several can fire concurrently for the same expired token, and the
+  // backend's refresh tokens are single-use: a "losing" concurrent
+  // refresh would 401 and would delete the cookies a "winning" one just
+  // set. Only a real navigation attempts refresh or clears cookies; a
+  // prefetch that can't prove the session is valid is passed through
+  // unchanged, and the real navigation (or the page's own
+  // verifySession()) handles the session-expired case exactly once.
+  const isBackgroundRequest =
+    request.headers.get("next-router-prefetch") === "1" ||
+    request.headers.get("purpose") === "prefetch";
+
+  if (isBackgroundRequest) {
+    return NextResponse.next();
   }
 
   if (refreshToken) {
@@ -40,7 +60,13 @@ export async function proxy(request: NextRequest) {
   }
 
   if (isPublicPath(pathname)) {
-    return NextResponse.next();
+    // Visiting /login directly always gets a clean slate: clear any
+    // stale/dead cookies rather than leaving them to trigger another
+    // doomed refresh attempt on the next load.
+    const response = NextResponse.next();
+    response.cookies.delete(ACCESS_TOKEN_COOKIE);
+    response.cookies.delete(REFRESH_TOKEN_COOKIE);
+    return response;
   }
 
   const response = NextResponse.redirect(new URL("/login", request.url));
@@ -60,7 +86,18 @@ async function refreshTokens(refreshToken: string): Promise<AuthTokens | null> {
     if (!response.ok) {
       return null;
     }
-    return (await response.json()) as AuthTokens;
+
+    const body = (await response.json()) as Partial<AuthTokens>;
+    if (typeof body.accessToken !== "string" || typeof body.refreshToken !== "string") {
+      return null;
+    }
+
+    // Prove both tokens decode cleanly before treating the refresh as
+    // successful -- setResponseCookies must never be able to throw.
+    decodeJwtExpirySeconds(body.accessToken);
+    decodeJwtExpirySeconds(body.refreshToken);
+
+    return { accessToken: body.accessToken, refreshToken: body.refreshToken };
   } catch {
     return null;
   }

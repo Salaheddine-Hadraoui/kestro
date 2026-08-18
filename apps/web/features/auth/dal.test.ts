@@ -21,7 +21,7 @@ describe("verifySession", () => {
     expect(redirect).not.toHaveBeenCalled();
   });
 
-  it("redirects to /login when there is no user", async () => {
+  it("redirects to /session-expired when there is no user", async () => {
     const mockFetchCurrentUser = jest.fn().mockResolvedValue(null);
     jest.doMock("./service", () => ({ fetchCurrentUser: mockFetchCurrentUser }));
     jest.doMock("next/navigation", () => ({
@@ -34,6 +34,6 @@ describe("verifySession", () => {
     await expect(verifySession()).rejects.toThrow("NEXT_REDIRECT");
 
     const { redirect } = await import("next/navigation");
-    expect(redirect).toHaveBeenCalledWith("/login");
+    expect(redirect).toHaveBeenCalledWith("/session-expired");
   });
 });

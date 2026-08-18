@@ -16,7 +16,7 @@ export const getCurrentUser = cache(async (): Promise<PublicUser | null> => {
 export async function verifySession(): Promise<PublicUser> {
   const user = await getCurrentUser();
   if (!user) {
-    redirect("/login");
+    redirect("/session-expired");
   }
   return user;
 }
