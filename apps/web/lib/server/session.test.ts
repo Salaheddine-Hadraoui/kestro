@@ -25,7 +25,7 @@ describe("buildCookieOptions", () => {
 
   afterEach(() => {
     jest.useRealTimers();
-    process.env.NODE_ENV = REAL_NODE_ENV;
+    (process.env as { NODE_ENV?: string }).NODE_ENV = REAL_NODE_ENV;
   });
 
   it("computes maxAge as seconds remaining until expiry", () => {
@@ -43,9 +43,9 @@ describe("buildCookieOptions", () => {
   });
 
   it("is only secure in production", () => {
-    process.env.NODE_ENV = "production";
+    (process.env as { NODE_ENV?: string }).NODE_ENV = "production";
     expect(buildCookieOptions(Date.now() / 1000 + 60).secure).toBe(true);
-    process.env.NODE_ENV = "development";
+    (process.env as { NODE_ENV?: string }).NODE_ENV = "development";
     expect(buildCookieOptions(Date.now() / 1000 + 60).secure).toBe(false);
   });
 });
