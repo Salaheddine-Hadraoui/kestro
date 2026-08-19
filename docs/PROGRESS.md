@@ -210,9 +210,10 @@ needs one.
 untouched): from `apps/web/` — `npx jest` 51/51 tests passing across 16
 suites; `npx tsc --noEmit` clean; `npm run build` (Next 16.3.0 / Turbopack)
 clean, emitting routes `/`, `/login`, `/session-expired`, `/_not-found` and
-the Proxy (Middleware); `npm run lint` (`eslint`) 0 errors with 1
-pre-existing warning (an unused `ApiError` import in
-`lib/server/api-client.test.ts`), deliberately left as recorded Minor debt.
+the Proxy (Middleware); `npm run lint` (`eslint`) 0 errors, 0 warnings (a
+prior pass had left an unused `ApiError` import in
+`lib/server/api-client.test.ts` as recorded Minor debt; fixed in a
+follow-up commit by asserting the import's `ApiError` type directly).
 The refresh design's cookie-visibility mechanism (above) was verified by
 hand against a live `next dev` server plus the real NestJS API during
 implementation — no unit test can cover it, which is exactly why the
