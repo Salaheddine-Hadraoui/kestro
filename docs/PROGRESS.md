@@ -61,6 +61,7 @@ against Case-scoped evidence (see "Hypothesis ↔ Evidence milestone" below).
 | Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. Now also owns linking Case-scoped Evidence to a Hypothesis for evaluation (Hypothesis ↔ Evidence milestone). |
 | Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. Now carries an optional `hypothesisId` (Hypothesis ↔ Evidence milestone), set only via Investigations' link action, never at evidence-creation time. |
 | Timeline | Done | `GET /cases/:caseId/timeline`, read-only, nested under a case; reuses Cases' visibility check; paginated (`limit`/`offset`), deterministic chronological order, author joined in one query; zero schema changes — the Milestone-1 foundation's `timeline_events` table and existing indexes already supported this. |
+| Web (Next.js app shell) | Done | Login, protected workspace layout, role-aware nav, UI primitives, BFF session/refresh architecture (see "Operations Workspace Foundation — implementation notes" below); no Alerts/Cases/Dashboard/Investigation/Evidence/Timeline UI yet |
 | Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
 
 ## Milestone 1 hardening pass
@@ -97,6 +98,126 @@ Implements docs/PRODUCT.md's "evaluating hypotheses against Evidence" — the on
 **Verification**: `prisma validate` and `prisma migrate status` clean (migration `20260813192734_link_evidence_to_hypothesis`, additive: one nullable column, one index, one FK — no data migration needed). `tsc --noEmit`, `eslint --fix`, and `nest build` all clean. Unit tests 125/125 passing (was 113; +12 for `linkEvidence`/`findLinkedEvidence` covering valid linking, cross-case rejection on both the evidence and the hypothesis side, Analyst/Lead authorization, unauthorized access, missing ids, duplicate-link rejection, and resolved-case blocking). E2E tests 98/98 passing (was 85; +13, same scenarios exercised over real HTTP end-to-end). Real-DB verification against `kestro-postgres-dev`: confirmed the migration's column/index/FK shape directly via `\d evidence`, then booted the compiled app against it and drove the full flow over real HTTP — create case, propose hypothesis, add evidence, link, list, confirm the timeline event, confirm re-linking correctly 409s, confirm the plain `GET evidence` endpoint already reflects the link — before cleaning up all throwaway rows.
 
 **Deliberately deferred**: no unlink endpoint (see above); no way to link evidence to a hypothesis at creation time (only after, via the link endpoint — see API section); many-to-many (one evidence item to many hypotheses) was considered and explicitly rejected as unjustified by current docs, not merely postponed — revisit only if a real product need for it appears.
+
+## Phase 2 — Operations Workspace
+
+Phase 2 moves Kestro from a backend-only API (Milestone 1 + Phase 1's
+Investigations/Hypothesis-Evidence, all complete through commit `b616883`)
+into an actually-usable product. A read-only architecture review (see
+conversation history — not a committed doc) evaluated search/filter, case
+export, richer metrics, and remaining B-tier hardening against the
+alternative of building the frontend first, and concluded the frontend is
+the higher-value next step: none of the other candidates have any value
+without a UI to consume them.
+
+**Phase 2 — Milestone 1: Operations Workspace Foundation** (this milestone)
+builds the app shell only: Next.js authentication UI, a Next.js
+BFF/authentication boundary holding JWTs in httpOnly cookies (never exposed
+to browser JavaScript), protected workspace routing, a typed server-side
+API client that fails closed on a 401, a role-aware navigation foundation,
+and a loading/error/empty-state foundation. The API client does **not** do
+401-triggered refresh-and-retry (as this milestone's original plan text
+said): it fails closed, and token refresh instead happens **proactively in
+`proxy.ts`**, ahead of any Server Component render — Next.js forbids
+writing cookies during that render and refresh must write cookies, so the
+API client cannot be the place refresh happens (see "Operations Workspace
+Foundation — implementation notes" below). It deliberately
+does **not** implement Alerts, Cases, Dashboard, Investigation, Evidence,
+or Timeline UI — those are later Phase 2 milestones, sequenced onto this
+foundation once it exists.
+
+No backend changes: the existing Auth module's JSON-token contract
+(`POST /v1/auth/login|refresh|logout`, `GET /v1/auth/me`) is called exactly
+as built. See "Key architectural/domain decisions already made" below for
+the frontend-side decisions this milestone makes (cookie strategy, Server
+Actions vs. Route Handlers, feature-oriented folder structure, etc.), added
+once implementation completes.
+
+### Operations Workspace Foundation — implementation notes
+
+**What was built** (all under `apps/web/`): the login UI (a Server Action
+plus its form), a BFF session layer (`lib/server/session.ts`,
+`lib/server/cookie-names.ts`) holding both JWTs in httpOnly cookies — never
+readable from browser JavaScript, which stays the hard invariant of this
+design; a typed `apiFetch` client (`lib/server/api-client.ts`) that fails
+closed to `SessionExpiredError` on any 401, with no retry; protected
+workspace routing (`app/(workspace)/`); a role-aware nav foundation
+(`lib/nav.ts`); and 4 UI primitives (Button, TextField, FormError,
+EmptyState). No Alerts/Cases/Dashboard/Investigation/Evidence/Timeline UI —
+those are later milestones.
+
+**The refresh architecture actually shipped** differs from this milestone's
+original plan text (which described 401-triggered refresh-and-retry inside
+the API client). That was corrected during implementation, once manual
+end-to-end testing against a live dev server showed the original design is
+impossible: Next.js forbids writing cookies during a Server Component
+render, and a refresh necessarily writes new cookies. What ships instead:
+
+- `proxy.ts` decodes the access token's own `exp` claim
+  (`lib/server/token-validity.ts`, no signature verification — NestJS
+  already did that) and, if it has expired, proactively calls
+  `POST /v1/auth/refresh` itself and writes the rotated cookies via
+  `NextResponse` — the one point in the request lifecycle that can
+  legitimately write cookies before a Server Component renders.
+  `verifySession()` (`GET /v1/auth/me`) remains the only authoritative check.
+- Concurrent requests carrying the same (single-use, backend-rotated)
+  refresh token are de-duplicated through an in-flight-promise cache keyed
+  on the token value, so two browser tabs — or a prefetch racing a real
+  navigation — share one backend call instead of one of them deleting the
+  cookies the other just set. The cache is per-server-process memory only;
+  it does not coordinate across instances behind a load balancer.
+- A network failure talking to the backend is treated as "try again later",
+  not "this session is dead": the refresh result is outcome-typed
+  (`success` / `rejected` / `unavailable`), and on `unavailable` the request
+  passes through with cookies untouched rather than cleared, so a transient
+  API outage cannot force-log-out an analyst mid-incident. Only an actual
+  backend rejection (non-OK status, or a malformed response body — a real
+  contract violation still fails closed) clears the session.
+
+**The one case the `exp`-only check cannot see** — a token that looks
+unexpired by its own claim but the backend rejects anyway (e.g. a rotated
+JWT secret) — is handled by `app/session-expired/route.ts`, a Route Handler
+(which, unlike a Server Component, is allowed to write cookies). It revokes
+the session through the same `logout()` used by the workspace's own logout
+action (best-effort `POST /v1/auth/logout`, then unconditional cookie
+clear), then redirects to `/login`. Without it a user with such a cookie
+would bounce between `/` and `/login` forever.
+
+**Explicit Next-version-coupled assumption**: this design depends on a
+cookie set by `proxy.ts` (via `NextResponse`) being visible to `cookies()`
+during the *same request's* Server Component render. That is real in the
+installed Next.js version (16.3.0) — confirmed by reading
+`node_modules/next/dist/server/web/spec-extension/response.js` and
+`node_modules/next/dist/server/async-storage/request-store.js`'s
+`mergeMiddlewareCookies` — but that same source carries its own `// TODO`
+noting the merge only fires for `IncomingHttpHeaders` and that `Headers`
+instances silently fall through. So a future Next.js upgrade, or a deploy
+target routing through the Web `Headers` code path, could silently revert
+this behavior with a fully green test suite (unit tests cannot exercise
+Next's own routing/adapter layer). **Re-verify this specific mechanism
+against a live dev server on every Next.js upgrade.**
+
+**Known, deliberately deferred limitation**: `app/session-expired/route.ts`
+is an unauthenticated `GET` reachable by an ordinary cross-site top-level
+navigation (`SameSite=Lax` cookies are sent on those), so a malicious
+external page could force-log-out a visiting user just by linking to it.
+Judged low-severity — a forced-logout/availability nuisance, no case-data
+exposure and no state change beyond ending a session — and not fixed in
+this pass; a `Sec-Fetch-Site` origin check is the likely fix if it ever
+needs one.
+
+**Verification** (frontend only; no backend changes, so backend tests were
+untouched): from `apps/web/` — `npx jest` 51/51 tests passing across 16
+suites; `npx tsc --noEmit` clean; `npm run build` (Next 16.3.0 / Turbopack)
+clean, emitting routes `/`, `/login`, `/session-expired`, `/_not-found` and
+the Proxy (Middleware); `npm run lint` (`eslint`) 0 errors, 0 warnings (a
+prior pass had left an unused `ApiError` import in
+`lib/server/api-client.test.ts` as recorded Minor debt; fixed in a
+follow-up commit by asserting the import's `ApiError` type directly).
+The refresh design's cookie-visibility mechanism (above) was verified by
+hand against a live `next dev` server plus the real NestJS API during
+implementation — no unit test can cover it, which is exactly why the
+Next-upgrade caveat above is written down.
 
 ## Key architectural/domain decisions already made
 
@@ -150,11 +271,11 @@ Implements docs/PRODUCT.md's "evaluating hypotheses against Evidence" — the on
 
 ## Current task
 
-Hypothesis ↔ Evidence linking is complete and verified (see above); commit pending as of this writing. No other work in progress.
+None in progress. **Phase 2 — Milestone 1: Operations Workspace Foundation** is complete and verified, including its final whole-branch review and the one consolidated fix wave that review triggered (see "Operations Workspace Foundation — implementation notes" above for what shipped and the verification results). Hypothesis ↔ Evidence linking, previously listed here, is also complete and verified (see "Hypothesis ↔ Evidence milestone" above).
 
 ## Next planned milestone
 
-Not yet decided. With the Investigation chain's core relationships now in place and the hardening pass's must-fix items resolved, candidates are: pick up one of Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md, none scoped yet), or work through the hardening audit's still-deferred B-tier findings (see "Known technical debt" below) as a second, smaller hardening pass. Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
+Not yet chosen. The frontend foundation (BFF auth with proactive proxy-side refresh, protected routing, role-aware nav, UI primitives) is now in place, so the next Phase 2 milestone is whichever workspace feature is sequenced onto it — Alerts UI, Cases UI, or another per docs/ROADMAP.md's own ordering — none of which is scoped yet. Still-open alternatives from before Phase 2 remain available: Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
 
 ## Known technical debt / limitations / follow-ups
 
@@ -175,6 +296,8 @@ Not yet decided. With the Investigation chain's core relationships now in place 
 - The "verify real DB behavior via manual psql smoke-testing" step (see Test strategy above) has no committed script or checklist — it's repeatable in principle but not in practice. This hardening pass's own real-DB verification (see above) was ad hoc for the same reason; turning it into a committed script is still outstanding. From the readiness audit; deferred.
 - `.env.example` doesn't document `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `DATABASE_URL`, `CORS_ORIGIN`, or `PORT`, all of which `environment-variables.ts` actually requires at boot. From the readiness audit; deferred.
 - No rate limiting on `/auth/login` — acceptable with no external/production exposure yet, but must land before any internet-facing deployment. From the readiness audit; deferred.
+- The frontend refresh design assumes a `proxy.ts`-set cookie is visible to `cookies()` in the same request's Server Component render (Next's `mergeMiddlewareCookies`) — true in Next 16.3.0 but not a public contract, and unit tests cannot detect a regression; re-verify manually on every Next.js upgrade. See "Operations Workspace Foundation — implementation notes" above.
+- `app/session-expired/route.ts` is an unauthenticated `GET`, so a cross-site link can force-log-out a visiting user (`SameSite=Lax`); judged a low-severity availability nuisance and deliberately not fixed — a `Sec-Fetch-Site` origin check is the likely eventual fix.
 
 ## Chronological change history
 
@@ -193,3 +316,4 @@ Not yet decided. With the Investigation chain's core relationships now in place 
 | `20d5894` | Timeline module: `GET /cases/:caseId/timeline` read-side API, paginated, deterministic order, author joined, reusing Cases' visibility rule; zero schema changes; closes Milestone 1 |
 | `6c2b16b` | Milestone 1 hardening pass: CLAUDE.md/PROGRESS.md reconciliation, `/v1` API versioning, Notes/Comments (`POST /cases/:id/notes`\|`/comments`), refresh-token rotation race fix — see "Milestone 1 hardening pass" above |
 | _(pending)_ | Hypothesis ↔ Evidence linking: nullable `evidence.hypothesis_id`, `POST`/`GET /cases/:caseId/hypotheses/:hypothesisId/evidence` on the Investigations module — see "Hypothesis ↔ Evidence milestone" above |
+| `b616883`..`b24e85d` + this commit | Operations Workspace Foundation: Next.js BFF auth (httpOnly-cookie session, `proxy.ts`-based proactive refresh with single-flight de-dupe, network-failure tolerance, and a fail-closed `apiFetch`), login UI, protected workspace layout, role-aware nav, UI primitives — see "Operations Workspace Foundation — implementation notes" above |
