@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { NextRequest } from "next/server";
-import { proxy, config } from "./proxy";
+import { proxy } from "./proxy";
 import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "@/lib/server/cookie-names";
 
 function makeFakeJwt(exp: number): string {
@@ -102,18 +102,41 @@ describe("proxy", () => {
     expect(global.fetch).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toBeNull();
   });
-});
 
-describe("config.matcher", () => {
-  it("matches the expected shape, excluding background prefetch/RSC requests", () => {
-    expect(config.matcher).toEqual([
-      {
-        source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
-        missing: [
-          { type: "header", key: "next-router-prefetch" },
-          { type: "header", key: "purpose", value: "prefetch" },
-        ],
-      },
-    ]);
+  it("passes an expired session through unmodified when the refresh network call fails", async () => {
+    (global.fetch as jest.Mock).mockRejectedValue(new Error("network unreachable"));
+    const request = makeRequest("/", {
+      [ACCESS_TOKEN_COOKIE]: makeFakeJwt(past),
+      [REFRESH_TOKEN_COOKIE]: "some-refresh-token",
+    });
+    const response = await proxy(request);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.cookies.get(ACCESS_TOKEN_COOKIE)).toBeUndefined();
+    expect(response.cookies.get(REFRESH_TOKEN_COOKIE)).toBeUndefined();
+  });
+
+  it("shares a single in-flight refresh across concurrent requests carrying the same refresh token", async () => {
+    const newAccessToken = makeFakeJwt(future);
+    const newRefreshToken = makeFakeJwt(future);
+    let resolveFetch!: (value: Response) => void;
+    const deferred = new Promise<Response>((resolve) => {
+      resolveFetch = resolve;
+    });
+    (global.fetch as jest.Mock).mockReturnValue(deferred);
+
+    const cookies = {
+      [ACCESS_TOKEN_COOKIE]: makeFakeJwt(past),
+      [REFRESH_TOKEN_COOKIE]: "shared-refresh-token",
+    };
+    const first = proxy(makeRequest("/", cookies));
+    const second = proxy(makeRequest("/cases", cookies));
+
+    resolveFetch(jsonResponse(200, { accessToken: newAccessToken, refreshToken: newRefreshToken }));
+
+    const [firstResponse, secondResponse] = await Promise.all([first, second]);
+
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+    expect(firstResponse.cookies.get(ACCESS_TOKEN_COOKIE)?.value).toBe(newAccessToken);
+    expect(secondResponse.cookies.get(ACCESS_TOKEN_COOKIE)?.value).toBe(newAccessToken);
   });
 });

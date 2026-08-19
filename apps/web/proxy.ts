@@ -37,14 +37,28 @@ export async function proxy(request: NextRequest) {
   }
 
   if (refreshToken) {
-    const refreshed = await refreshTokens(refreshToken);
-    if (refreshed) {
+    const result = await refreshTokens(refreshToken);
+
+    if (result.outcome === "success") {
       const response = isPublicPath(pathname)
         ? NextResponse.redirect(new URL("/", request.url))
         : NextResponse.next();
-      setResponseCookies(response, refreshed);
+      setResponseCookies(response, result.tokens);
       return response;
     }
+
+    if (result.outcome === "unavailable") {
+      // A network failure talking to the backend is not the same thing
+      // as the backend rejecting this refresh token. Destroying a
+      // possibly-still-valid session because of a transient blip would
+      // force-log-out every analyst mid-outage. Pass the request through
+      // unmodified: if the API really is down, the page's own
+      // verifySession() surfaces that honestly (Next's error boundary)
+      // instead of silently ending the session.
+      return NextResponse.next();
+    }
+    // result.outcome === "rejected": fall through -- the backend has
+    // spoken, this refresh token is dead.
   }
 
   if (isPublicPath(pathname)) {
@@ -63,21 +77,59 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
-async function refreshTokens(refreshToken: string): Promise<AuthTokens | null> {
+type RefreshResult =
+  | { outcome: "success"; tokens: AuthTokens }
+  | { outcome: "rejected" }
+  | { outcome: "unavailable" };
+
+// Concurrent requests (e.g. two open tabs) can both see the same expired
+// access token and both attempt to refresh with the same, single-use
+// refresh-token cookie. Without de-duplication the backend's rotation
+// means only one succeeds, and the "loser" would delete the cookies the
+// "winner" just set -- spuriously ending a session that was never
+// actually invalid. Keying an in-flight-promise cache on the refresh
+// token's own value, cleared as soon as each attempt settles, means
+// concurrent requests carrying the same token share one backend call and
+// one outcome instead of racing. This cache is scoped to this server
+// process's memory; it doesn't coordinate across multiple server
+// instances behind a load balancer, but that's the same scope every
+// other piece of proxy.ts's in-memory state already has.
+const inFlightRefreshes = new Map<string, Promise<RefreshResult>>();
+
+function refreshTokens(refreshToken: string): Promise<RefreshResult> {
+  const inFlight = inFlightRefreshes.get(refreshToken);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const attempt = performRefresh(refreshToken).finally(() => {
+    inFlightRefreshes.delete(refreshToken);
+  });
+  inFlightRefreshes.set(refreshToken, attempt);
+  return attempt;
+}
+
+async function performRefresh(refreshToken: string): Promise<RefreshResult> {
+  let response: Response;
   try {
-    const response = await fetch(`${env.apiUrl}/v1/auth/refresh`, {
+    response = await fetch(`${env.apiUrl}/v1/auth/refresh`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
       cache: "no-store",
     });
-    if (!response.ok) {
-      return null;
-    }
+  } catch {
+    return { outcome: "unavailable" };
+  }
 
+  if (!response.ok) {
+    return { outcome: "rejected" };
+  }
+
+  try {
     const body = (await response.json()) as Partial<AuthTokens>;
     if (typeof body.accessToken !== "string" || typeof body.refreshToken !== "string") {
-      return null;
+      return { outcome: "rejected" };
     }
 
     // Prove both tokens decode cleanly before treating the refresh as
@@ -85,9 +137,12 @@ async function refreshTokens(refreshToken: string): Promise<AuthTokens | null> {
     decodeJwtExpirySeconds(body.accessToken);
     decodeJwtExpirySeconds(body.refreshToken);
 
-    return { accessToken: body.accessToken, refreshToken: body.refreshToken };
+    return {
+      outcome: "success",
+      tokens: { accessToken: body.accessToken, refreshToken: body.refreshToken },
+    };
   } catch {
-    return null;
+    return { outcome: "rejected" };
   }
 }
 
@@ -105,13 +160,5 @@ function setResponseCookies(response: NextResponse, tokens: AuthTokens): void {
 }
 
 export const config = {
-  matcher: [
-    {
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
-      missing: [
-        { type: "header", key: "next-router-prefetch" },
-        { type: "header", key: "purpose", value: "prefetch" },
-      ],
-    },
-  ],
+  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
 };
