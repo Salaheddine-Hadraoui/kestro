@@ -5,8 +5,13 @@ import { buildUserNameMap, resolveUserName } from "@/lib/format-user";
 import { ApiError } from "@/lib/server/api-client";
 import { EmptyState } from "@/components/ui/empty-state";
 import { getAvailableActions } from "@/lib/case-transitions";
+import { extractHumanEntries } from "@/lib/case-notes";
 import { TransitionButton } from "./transition-button";
 import { ReassignForm } from "./reassign-form";
+import { CaseEntryForm } from "./case-entry-form";
+import { addCommentAction, addNoteAction } from "./actions";
+
+const NOTES_AND_COMMENTS_LIMIT = 100;
 
 export default async function CaseDetailPage({
   params,
@@ -99,6 +104,43 @@ export default async function CaseDetailPage({
             caseId={kase.id}
             activeUsers={users.filter((candidate) => !candidate.disabledAt && candidate.id !== kase.assigneeId)}
           />
+        )}
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-black/60 dark:text-white/60">
+          Notes & Comments
+        </h2>
+        {timeline.total > NOTES_AND_COMMENTS_LIMIT && (
+          <p className="text-xs text-black/50 dark:text-white/50">
+            Showing the latest {NOTES_AND_COMMENTS_LIMIT} timeline entries; earlier entries are not shown here.
+          </p>
+        )}
+        {(() => {
+          const entries = extractHumanEntries(timeline.data);
+          return entries.length === 0 ? (
+            <p className="text-sm text-black/60 dark:text-white/60">No notes or comments yet.</p>
+          ) : (
+            <ul className="space-y-3">
+              {entries.map((entry) => (
+                <li key={entry.id} className="rounded-md border border-black/10 p-3 text-sm dark:border-white/10">
+                  <div className="flex items-center justify-between text-xs text-black/60 dark:text-white/60">
+                    <span>
+                      {entry.kind === "note" ? "Note" : "Comment"} by {entry.authorName}
+                    </span>
+                    <span>{new Date(entry.createdAt).toLocaleString()}</span>
+                  </div>
+                  <p className="mt-1">{entry.text}</p>
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
+        {kase.status !== "RESOLVED" && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            <CaseEntryForm caseId={kase.id} kind="note" action={addNoteAction} />
+            <CaseEntryForm caseId={kase.id} kind="comment" action={addCommentAction} />
+          </div>
         )}
       </section>
     </div>

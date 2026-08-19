@@ -121,4 +121,57 @@ describe("CaseDetailPage", () => {
 
     expect(screen.getByLabelText(/reassign to/i)).toBeInTheDocument();
   });
+
+  it("renders notes and comments extracted from the timeline, and excludes system events", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    (listCaseTimelineEntries as jest.Mock).mockResolvedValue({
+      data: [
+        {
+          id: "e1",
+          caseId: "c1",
+          type: "comment",
+          authorId: "u1",
+          content: { text: "Agreed, escalating" },
+          createdAt: "2026-08-19T01:00:00.000Z",
+          author: { id: "u1", name: "Ada Lovelace", role: "analyst" },
+        },
+        {
+          id: "e2",
+          caseId: "c1",
+          type: "note",
+          authorId: "u1",
+          content: { event: "assignee_changed", fromAssigneeId: "u1", toAssigneeId: "u2" },
+          createdAt: "2026-08-19T00:30:00.000Z",
+          author: { id: "u1", name: "Ada Lovelace", role: "analyst" },
+        },
+      ],
+      total: 2,
+      limit: 100,
+      offset: 0,
+    });
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByText("Agreed, escalating")).toBeInTheDocument();
+    expect(screen.queryByText(/assignee_changed/i)).not.toBeInTheDocument();
+  });
+
+  it("shows add-note and add-comment forms when the case is not resolved", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByRole("button", { name: /add note/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /add comment/i })).toBeInTheDocument();
+  });
+
+  it("hides add-note and add-comment forms when the case is resolved", async () => {
+    (getCase as jest.Mock).mockResolvedValue({ ...kase, status: "RESOLVED", resolutionSummary: "Done." });
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.queryByRole("button", { name: /add note/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /add comment/i })).not.toBeInTheDocument();
+  });
 });
