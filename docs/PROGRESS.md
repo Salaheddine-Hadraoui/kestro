@@ -61,7 +61,7 @@ against Case-scoped evidence (see "Hypothesis ↔ Evidence milestone" below).
 | Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. Now also owns linking Case-scoped Evidence to a Hypothesis for evaluation (Hypothesis ↔ Evidence milestone). |
 | Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. Now carries an optional `hypothesisId` (Hypothesis ↔ Evidence milestone), set only via Investigations' link action, never at evidence-creation time. |
 | Timeline | Done | `GET /cases/:caseId/timeline`, read-only, nested under a case; reuses Cases' visibility check; paginated (`limit`/`offset`), deterministic chronological order, author joined in one query; zero schema changes — the Milestone-1 foundation's `timeline_events` table and existing indexes already supported this. |
-| Web (Next.js app shell) | Done | Login, protected workspace layout, role-aware nav, UI primitives, BFF session/refresh architecture (see "Operations Workspace Foundation — implementation notes" below); no Alerts/Cases/Dashboard/Investigation/Evidence/Timeline UI yet |
+| Web (Next.js app shell) | Done | Login, protected workspace layout, role-aware nav, UI primitives, BFF session/refresh architecture (see "Operations Workspace Foundation — implementation notes" below); Cases Workspace — case list with filters, case detail with lifecycle transitions/reassignment/notes/comments, case creation (see "Cases Workspace (Milestone 2) — implementation notes" below); no Alerts/Dashboard/Investigation/Evidence/Timeline UI yet |
 | Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
 
 ## Milestone 1 hardening pass
@@ -219,6 +219,91 @@ hand against a live `next dev` server plus the real NestJS API during
 implementation — no unit test can cover it, which is exactly why the
 Next-upgrade caveat above is written down.
 
+### Cases Workspace (Milestone 2) — implementation notes
+
+**What was built** (all under `apps/web/`, on top of the Operations
+Workspace Foundation): a case list page (`app/(workspace)/cases/page.tsx`)
+with status/severity/assignee filters, role-scoped exactly as the backend
+already scopes `GET /v1/cases` (Analysts see only their own assigned cases;
+Leads see everyone's and get an assignee filter); a case detail page
+(`app/(workspace)/cases/[id]/page.tsx`) rendering full case fields,
+role-and-status-gated lifecycle transition buttons
+(`transition-button.tsx`, driven by `getAvailableActions(status, role)`),
+a Lead-only reassignment form (`reassign-form.tsx`), and a Notes & Comments
+section with add-note/add-comment forms (`case-entry-form.tsx`) that
+disappear once a case is `RESOLVED`; a case creation page
+(`app/(workspace)/cases/new/page.tsx`, no assignee field for Analysts, who
+always self-assign); a typed service layer (`features/cases/service.ts`)
+wrapping `listCases`/`getCase`/`createCase`/`transitionCase`/
+`reassignCase`/`addNote`/`addComment`/`listCaseTimelineEntries` over the
+existing Cases/Timeline API, plus `extractHumanEntries` for the
+notes/comments decision below; a new "Cases" nav item.
+
+**Notes/comments via filtered Timeline, not a Timeline UI (product decision
+(b))** — the backend has no dedicated notes/comments read endpoint, only
+`GET /cases/:caseId/timeline`, which interleaves human-authored `note`/
+`comment` entries with system-generated ones (`status_change`,
+`assignee_changed`, `hypothesis_*`, etc.). Rather than add a backend
+endpoint (out of scope — this milestone makes zero backend changes) or
+build a full Timeline UI (a separate, unscoped capability), the Notes &
+Comments section calls the existing Timeline endpoint and filters
+client-side (`extractHumanEntries`) to just `note` (discriminated by its
+`event: 'note_added'` content marker, since `note` is overloaded for
+`assignee_changed`) and `comment` entries. This is deliberately **not** a
+Timeline UI: no system events, no pagination beyond what the filtered list
+needs, and no ordering/rendering decisions beyond "show the human entries
+attributed to their author." A full Timeline UI remains unscoped.
+
+**Zero backend changes**: every route this milestone consumes
+(`POST /v1/cases`, `GET /v1/cases`, `GET /v1/cases/:id`,
+`POST /v1/cases/:id/transitions`, `PATCH /v1/cases/:id` for reassignment,
+`POST /v1/cases/:id/notes`, `POST /v1/cases/:id/comments`,
+`GET /v1/cases/:caseId/timeline`) already existed exactly as built in
+Milestone 1 and the Milestone 1 hardening pass; nothing in `apps/api/` was
+touched.
+
+**Verification (Task 10 — full-suite + live walkthrough)**: from
+`apps/web/` — `npx jest` 105/105 tests passing across 27 suites;
+`npx tsc --noEmit` clean; `npm run build` (Next 16.3.0/Turbopack) clean,
+emitting routes `/`, `/_not-found`, `/cases`, `/cases/[id]`, `/cases/new`,
+`/login`, `/session-expired` and the Proxy (Middleware); `npm run lint`
+(`eslint`) clean. From `apps/api/` — `npx jest` 125/125 (10 suites) and
+`npm run test:e2e` 98/98 (8 suites) both passing unmodified, confirming
+this milestone made no backend regressions; `prisma validate` and
+`prisma migrate status` both clean (7 migrations, schema up to date),
+confirming zero schema/backend drift.
+
+A live walkthrough was run against the real NestJS API (`npm run start:dev`)
+and a live `next dev` server, using `curl` in place of a browser (no
+browser-automation tool was available in this environment): two throwaway
+Analyst accounts and a throwaway Lead account were created directly via
+Prisma (mirroring the e2e tests' fixture pattern, since user creation is
+itself Lead-gated via the API and the dev DB started empty), then, as one
+Analyst — logged in, created a case (self-assigned, `201`), listed cases
+(scoped correctly, `200`), fetched case detail (`200`), ran `begin_triage`
+(`200`, status → `TRIAGING`), added a note and a comment (`201` each,
+both appearing author-joined in `GET .../timeline`), ran the remaining
+forward transitions (`start_investigation` → `begin_mitigation` →
+`begin_verification` → `resolve` with a `resolutionSummary`, all `200`,
+final status `RESOLVED` with the summary set), confirmed a further note
+attempt on the resolved case was rejected (`409`), confirmed a second
+Analyst got `403` fetching the first Analyst's case, and confirmed a
+nonexistent case id returned `404`. Every response matched what Task 4's
+service layer assumes — no route/shape mismatch found. Separately, the
+frontend's own protected-route wiring was confirmed live: `/login` renders
+the real login form (`name="email"`), and `/cases`, `/cases/new`, and
+`/cases/[id]` all `307`-redirect to `/login` when requested without a
+session cookie, proving the proxy/auth boundary extends correctly to the
+new Cases routes. All throwaway rows (users, the one case, its timeline
+events, refresh tokens) were deleted afterward and the dev DB was confirmed
+back to empty (0 users/cases/timeline_events/refresh_tokens), matching how
+it was found; both dev servers were then stopped. The full click-through
+browser walkthrough (login via the UI, create → list → detail →
+transition → note/comment → reassign) was **not** performed, since no
+browser-automation tool was available in this environment — the API-level
+walkthrough above plus the protected-route checks stand as the verification
+evidence in its place.
+
 ## Key architectural/domain decisions already made
 
 - **Primary keys**: UUID across all Milestone 1 tables, `@default(uuid())` (client-side generation, not DB-side).
@@ -271,11 +356,11 @@ Next-upgrade caveat above is written down.
 
 ## Current task
 
-None in progress. **Phase 2 — Milestone 1: Operations Workspace Foundation** is complete and verified, including its final whole-branch review and the one consolidated fix wave that review triggered (see "Operations Workspace Foundation — implementation notes" above for what shipped and the verification results). Hypothesis ↔ Evidence linking, previously listed here, is also complete and verified (see "Hypothesis ↔ Evidence milestone" above).
+None in progress. **Phase 2 — Milestone 2: Cases Workspace** is complete and verified, including its full-suite verification bar and a live API-level walkthrough against the real backend and a live frontend dev server (see "Cases Workspace (Milestone 2) — implementation notes" above for what shipped and the verification results). Milestone 1: Operations Workspace Foundation and the Hypothesis ↔ Evidence milestone remain complete and verified as before (see their respective sections above).
 
 ## Next planned milestone
 
-Not yet chosen. The frontend foundation (BFF auth with proactive proxy-side refresh, protected routing, role-aware nav, UI primitives) is now in place, so the next Phase 2 milestone is whichever workspace feature is sequenced onto it — Alerts UI, Cases UI, or another per docs/ROADMAP.md's own ordering — none of which is scoped yet. Still-open alternatives from before Phase 2 remain available: Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
+Not yet chosen again. With both the app shell (Milestone 1) and the Cases Workspace (Milestone 2) now in place, the next Phase 2 milestone is whichever workspace feature is sequenced on top of them — Alerts UI, a Dashboard, Investigation/Evidence UI, or another per docs/ROADMAP.md's own ordering — none of which is scoped yet. Still-open alternatives from before Phase 2 remain available: Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
 
 ## Known technical debt / limitations / follow-ups
 
