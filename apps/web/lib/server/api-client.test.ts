@@ -45,7 +45,9 @@ describe("apiFetch", () => {
     (global.fetch as jest.Mock).mockResolvedValue(
       jsonResponse(403, { statusCode: 403, message: "Insufficient role for this action" }),
     );
-    await expect(apiFetch("/cases/1")).rejects.toMatchObject({
+    const promise = apiFetch("/cases/1");
+    await expect(promise).rejects.toBeInstanceOf(ApiError);
+    await expect(promise).rejects.toMatchObject({
       status: 403,
       message: "Insufficient role for this action",
     });
