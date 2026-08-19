@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { verifySession } from "@/features/auth/dal";
 import { listCases } from "@/features/cases/service";
 import { listUsers } from "@/features/users/service";
@@ -57,12 +58,12 @@ export default async function CasesPage({
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Cases</h1>
-        <a
+        <Link
           href="/cases/new"
           className="rounded-md bg-black px-4 py-2 text-sm font-medium text-white hover:bg-black/80 dark:bg-white dark:text-black dark:hover:bg-white/80"
         >
           New case
-        </a>
+        </Link>
       </div>
 
       <form method="GET" className="flex flex-wrap items-end gap-4">
@@ -125,9 +126,9 @@ export default async function CasesPage({
             {cases.map((kase) => (
               <tr key={kase.id} className="border-b border-black/5 dark:border-white/5">
                 <td className="py-2">
-                  <a href={`/cases/${kase.id}`} className="underline">
+                  <Link href={`/cases/${kase.id}`} className="underline">
                     {kase.title}
-                  </a>
+                  </Link>
                 </td>
                 <td className="py-2">{kase.status}</td>
                 <td className="py-2">{kase.severity}</td>
