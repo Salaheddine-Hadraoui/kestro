@@ -107,8 +107,27 @@ describe("cases service", () => {
   });
 
   it("listCaseTimelineEntries fetches up to 100 entries from the timeline endpoint", async () => {
-    (apiFetch as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 100, offset: 0 });
+    (apiFetch as jest.Mock).mockResolvedValue({ data: [], total: 40, limit: 100, offset: 0 });
     await listCaseTimelineEntries("c1");
     expect(apiFetch).toHaveBeenCalledWith("/cases/c1/timeline?limit=100&offset=0");
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("listCaseTimelineEntries fetches the tail page when total exceeds 100", async () => {
+    (apiFetch as jest.Mock)
+      .mockResolvedValueOnce({ data: [], total: 137, limit: 100, offset: 0 })
+      .mockResolvedValueOnce({ data: [], total: 137, limit: 100, offset: 37 });
+
+    await listCaseTimelineEntries("c1");
+
+    expect(apiFetch).toHaveBeenCalledTimes(2);
+    expect(apiFetch).toHaveBeenNthCalledWith(1, "/cases/c1/timeline?limit=100&offset=0");
+    expect(apiFetch).toHaveBeenNthCalledWith(2, "/cases/c1/timeline?limit=100&offset=37");
+  });
+
+  it("encodes the case id when building the request path", async () => {
+    (apiFetch as jest.Mock).mockResolvedValue({ id: "c1" });
+    await getCase("has space/slash");
+    expect(apiFetch).toHaveBeenCalledWith("/cases/has%20space%2Fslash");
   });
 });

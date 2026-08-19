@@ -27,6 +27,18 @@ function firstValue(value: string | string[] | undefined): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
+function buildPageHref(
+  filters: { status?: CaseStatus; severity?: Severity; assigneeId?: string },
+  offset: number,
+): string {
+  const params = new URLSearchParams();
+  if (filters.status !== undefined) params.set("status", filters.status);
+  if (filters.severity !== undefined) params.set("severity", filters.severity);
+  if (filters.assigneeId !== undefined) params.set("assigneeId", filters.assigneeId);
+  params.set("offset", String(offset));
+  return `/cases?${params.toString()}`;
+}
+
 export default async function CasesPage({
   searchParams,
 }: {
@@ -40,15 +52,21 @@ export default async function CasesPage({
   const assigneeId = firstValue(params.assigneeId);
   const offset = firstValue(params.offset);
 
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const safeAssigneeId = assigneeId !== undefined && UUID_RE.test(assigneeId) ? assigneeId : undefined;
+
+  const parsedOffset = offset !== undefined ? Number(offset) : 0;
+  const safeOffset = Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
+
   const filters = {
     status: STATUSES.includes(status as CaseStatus) ? (status as CaseStatus) : undefined,
     severity: SEVERITIES.includes(severity as Severity) ? (severity as Severity) : undefined,
     // Only meaningful for a Lead -- the backend ignores this for an
     // Analyst and always scopes their list to themselves regardless
     // (apps/api/src/cases/cases.service.ts's findAll()).
-    assigneeId: user.role === "lead" ? assigneeId : undefined,
+    assigneeId: user.role === "lead" ? safeAssigneeId : undefined,
     limit: 25,
-    offset: offset && !Number.isNaN(Number(offset)) ? Number(offset) : 0,
+    offset: safeOffset,
   };
 
   const [{ data: cases, total }, users] = await Promise.all([listCases(filters), listUsers()]);
@@ -142,6 +160,25 @@ export default async function CasesPage({
       <p className="text-sm text-black/60 dark:text-white/60">
         Showing {cases.length} of {total} case{total === 1 ? "" : "s"}.
       </p>
+
+      <div className="flex items-center gap-4">
+        {filters.offset > 0 && (
+          <Link
+            href={buildPageHref(filters, Math.max(0, filters.offset - filters.limit))}
+            className="text-sm underline"
+          >
+            Previous
+          </Link>
+        )}
+        {filters.offset + cases.length < total && (
+          <Link
+            href={buildPageHref(filters, filters.offset + filters.limit)}
+            className="text-sm underline"
+          >
+            Next
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

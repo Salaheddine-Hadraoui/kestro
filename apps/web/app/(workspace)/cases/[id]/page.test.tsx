@@ -79,6 +79,7 @@ describe("CaseDetailPage", () => {
     render(jsx);
 
     expect(screen.getByText(/don't have access/i)).toBeInTheDocument();
+    expect(screen.queryByText(kase.title)).not.toBeInTheDocument();
   });
 
   it("renders a clear message when the case does not exist (404)", async () => {
