@@ -22,6 +22,11 @@ import type { AuthTokens } from "@/lib/api/types";
 // app/session-expired/route.ts, reached via verifySession()'s redirect.
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
+
+  if (pathname === "/session-expired") {
+    return NextResponse.next();
+  }
+
   const accessToken = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
   const refreshToken = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
 
@@ -29,23 +34,6 @@ export async function proxy(request: NextRequest) {
     return isPublicPath(pathname)
       ? NextResponse.redirect(new URL("/", request.url))
       : NextResponse.next();
-  }
-
-  // Background prefetch/RSC requests (e.g. Next.js prefetching a <Link>
-  // in the viewport) must not drive session-lifecycle side effects.
-  // Several can fire concurrently for the same expired token, and the
-  // backend's refresh tokens are single-use: a "losing" concurrent
-  // refresh would 401 and would delete the cookies a "winning" one just
-  // set. Only a real navigation attempts refresh or clears cookies; a
-  // prefetch that can't prove the session is valid is passed through
-  // unchanged, and the real navigation (or the page's own
-  // verifySession()) handles the session-expired case exactly once.
-  const isBackgroundRequest =
-    request.headers.get("next-router-prefetch") === "1" ||
-    request.headers.get("purpose") === "prefetch";
-
-  if (isBackgroundRequest) {
-    return NextResponse.next();
   }
 
   if (refreshToken) {
@@ -117,5 +105,13 @@ function setResponseCookies(response: NextResponse, tokens: AuthTokens): void {
 }
 
 export const config = {
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"],
+  matcher: [
+    {
+      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      missing: [
+        { type: "header", key: "next-router-prefetch" },
+        { type: "header", key: "purpose", value: "prefetch" },
+      ],
+    },
+  ],
 };

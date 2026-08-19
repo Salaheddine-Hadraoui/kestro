@@ -1,6 +1,6 @@
 /** @jest-environment node */
 import { NextRequest } from "next/server";
-import { proxy } from "./proxy";
+import { proxy, config } from "./proxy";
 import { ACCESS_TOKEN_COOKIE, REFRESH_TOKEN_COOKIE } from "@/lib/server/cookie-names";
 
 function makeFakeJwt(exp: number): string {
@@ -49,8 +49,10 @@ describe("proxy", () => {
   });
 
   it("refreshes and lets an expired access token through on a protected path when refresh succeeds", async () => {
+    const newAccessToken = makeFakeJwt(future);
+    const newRefreshToken = makeFakeJwt(future);
     (global.fetch as jest.Mock).mockResolvedValue(
-      jsonResponse(200, { accessToken: makeFakeJwt(future), refreshToken: makeFakeJwt(future) }),
+      jsonResponse(200, { accessToken: newAccessToken, refreshToken: newRefreshToken }),
     );
     const request = makeRequest("/", {
       [ACCESS_TOKEN_COOKIE]: makeFakeJwt(past),
@@ -58,8 +60,8 @@ describe("proxy", () => {
     });
     const response = await proxy(request);
     expect(response.headers.get("location")).toBeNull();
-    expect(response.cookies.get(ACCESS_TOKEN_COOKIE)?.value).toBeTruthy();
-    expect(response.cookies.get(REFRESH_TOKEN_COOKIE)?.value).toBeTruthy();
+    expect(response.cookies.get(ACCESS_TOKEN_COOKIE)?.value).toBe(newAccessToken);
+    expect(response.cookies.get(REFRESH_TOKEN_COOKIE)?.value).toBe(newRefreshToken);
   });
 
   it("redirects to /login and clears cookies when refresh fails on a protected path", async () => {
@@ -70,6 +72,8 @@ describe("proxy", () => {
     });
     const response = await proxy(request);
     expect(response.headers.get("location")).toBe("http://localhost:3000/login");
+    expect(response.cookies.get(ACCESS_TOKEN_COOKIE)?.value).toBe("");
+    expect(response.cookies.get(REFRESH_TOKEN_COOKIE)?.value).toBe("");
   });
 
   it("does not throw and fails closed when the refresh response body is malformed", async () => {
@@ -89,14 +93,27 @@ describe("proxy", () => {
     expect(global.fetch).not.toHaveBeenCalled();
   });
 
-  it("passes a background prefetch request through without attempting refresh", async () => {
-    const request = makeRequest(
-      "/",
-      { [ACCESS_TOKEN_COOKIE]: makeFakeJwt(past), [REFRESH_TOKEN_COOKIE]: "some-refresh-token" },
-      { "next-router-prefetch": "1" },
-    );
+  it("does not attempt refresh when visiting /session-expired", async () => {
+    const request = makeRequest("/session-expired", {
+      [ACCESS_TOKEN_COOKIE]: makeFakeJwt(past),
+      [REFRESH_TOKEN_COOKIE]: "some-refresh-token",
+    });
     const response = await proxy(request);
     expect(global.fetch).not.toHaveBeenCalled();
     expect(response.headers.get("location")).toBeNull();
+  });
+});
+
+describe("config.matcher", () => {
+  it("matches the expected shape, excluding background prefetch/RSC requests", () => {
+    expect(config.matcher).toEqual([
+      {
+        source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+        missing: [
+          { type: "header", key: "next-router-prefetch" },
+          { type: "header", key: "purpose", value: "prefetch" },
+        ],
+      },
+    ]);
   });
 });
