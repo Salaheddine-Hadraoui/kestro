@@ -89,4 +89,36 @@ describe("CaseDetailPage", () => {
 
     expect(screen.getByText(/case not found/i)).toBeInTheDocument();
   });
+
+  it("renders only the transition buttons valid for the current status and role", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase); // status: INVESTIGATING, analyst
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByRole("button", { name: /escalate/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /begin mitigation/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /accept escalation/i })).not.toBeInTheDocument();
+  });
+
+  it("does not render the reassign form for an Analyst", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.queryByLabelText(/reassign to/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the reassign form for a Lead", async () => {
+    (verifySession as jest.Mock).mockResolvedValue({ id: "u2", name: "Grace Hopper", role: "lead" });
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    (listUsers as jest.Mock).mockResolvedValue([
+      { id: "u1", name: "Ada Lovelace", role: "analyst", disabledAt: null },
+      { id: "u2", name: "Grace Hopper", role: "lead", disabledAt: null },
+    ]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByLabelText(/reassign to/i)).toBeInTheDocument();
+  });
 });

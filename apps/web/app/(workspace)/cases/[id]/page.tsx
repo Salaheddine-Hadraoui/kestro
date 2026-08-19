@@ -4,6 +4,9 @@ import { listUsers } from "@/features/users/service";
 import { buildUserNameMap, resolveUserName } from "@/lib/format-user";
 import { ApiError } from "@/lib/server/api-client";
 import { EmptyState } from "@/components/ui/empty-state";
+import { getAvailableActions } from "@/lib/case-transitions";
+import { TransitionButton } from "./transition-button";
+import { ReassignForm } from "./reassign-form";
 
 export default async function CaseDetailPage({
   params,
@@ -82,13 +85,22 @@ export default async function CaseDetailPage({
         )}
       </section>
 
-      {/* Lifecycle transition controls and reassignment (Task 8), and the
-          Notes & Comments section (Task 9), are added here as additional
-          sections in their own tasks -- this task only covers the
-          read-only view. */}
-      <p data-testid="case-detail-placeholder" className="hidden">
-        {JSON.stringify({ user: user.role, timelineTotal: timeline.total })}
-      </p>
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-black/60 dark:text-white/60">
+          Actions
+        </h2>
+        <div className="flex flex-wrap gap-4">
+          {getAvailableActions(kase.status, user.role).map((rule) => (
+            <TransitionButton key={rule.action} caseId={kase.id} rule={rule} />
+          ))}
+        </div>
+        {user.role === "lead" && (
+          <ReassignForm
+            caseId={kase.id}
+            activeUsers={users.filter((candidate) => !candidate.disabledAt && candidate.id !== kase.assigneeId)}
+          />
+        )}
+      </section>
     </div>
   );
 }
