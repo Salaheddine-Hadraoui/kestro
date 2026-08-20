@@ -1,5 +1,9 @@
-import { CASE_STATUS_BADGE_TONE, SEVERITY_BADGE_TONE } from "./badge-tones";
-import type { CaseStatus, Severity } from "./api/types";
+import {
+  ALERT_STATUS_BADGE_TONE,
+  CASE_STATUS_BADGE_TONE,
+  SEVERITY_BADGE_TONE,
+} from "./badge-tones";
+import type { AlertStatus, CaseStatus, Severity } from "./api/types";
 
 // Regression guard: a new Severity/CaseStatus value added to lib/api/types.ts
 // without a matching tone entry would render `undefined` classes (an
@@ -31,5 +35,12 @@ describe("badge-tones", () => {
   it("gives every CaseStatus a distinct tone from its neighbors in the lifecycle", () => {
     expect(CASE_STATUS_BADGE_TONE.ESCALATED).not.toBe(CASE_STATUS_BADGE_TONE.INVESTIGATING);
     expect(CASE_STATUS_BADGE_TONE.RESOLVED).not.toBe(CASE_STATUS_BADGE_TONE.OPEN);
+  });
+
+  it("maps every AlertStatus value to a tone", () => {
+    const statuses: AlertStatus[] = ["new", "linked", "dismissed"];
+    for (const status of statuses) {
+      expect(ALERT_STATUS_BADGE_TONE[status]).toBeDefined();
+    }
   });
 });

@@ -1,5 +1,5 @@
 import type { BadgeTone } from "@/components/ui/badge";
-import type { CaseStatus, Severity } from "./api/types";
+import type { AlertStatus, CaseStatus, Severity } from "./api/types";
 
 // Shared semantic color mapping for severity and case lifecycle status.
 // Kept in one place (rather than re-derived per page) so a future
@@ -21,4 +21,15 @@ export const CASE_STATUS_BADGE_TONE: Record<CaseStatus, BadgeTone> = {
   MITIGATING: "amber",
   VERIFYING: "cyan",
   RESOLVED: "green",
+};
+
+// new = unactioned (matches CaseStatus.OPEN's neutral treatment); linked =
+// successfully triaged into a case (a positive outcome, like RESOLVED);
+// dismissed = closed without further action, given a color distinct from
+// both so a scanning analyst can tell "still in my queue" (new) apart from
+// either terminal outcome at a glance.
+export const ALERT_STATUS_BADGE_TONE: Record<AlertStatus, BadgeTone> = {
+  new: "neutral",
+  linked: "green",
+  dismissed: "purple",
 };

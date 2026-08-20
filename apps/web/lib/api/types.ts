@@ -69,6 +69,9 @@ export interface Alert {
   severity: Severity;
   status: AlertStatus;
   dismissReason: string | null;
+  dismissedById: string | null;
+  dismissedAt: string | null;
+  rawPayload: Record<string, unknown> | null;
   createdAt: string;
 }
 
@@ -78,6 +81,13 @@ export interface CaseWithAlerts extends Case {
 
 export interface PaginatedCases {
   data: Case[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PaginatedAlerts {
+  data: Alert[];
   total: number;
   limit: number;
   offset: number;
