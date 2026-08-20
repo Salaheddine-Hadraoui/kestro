@@ -8,8 +8,11 @@ import {
   rejectHypothesis,
   validateHypothesis,
 } from "@/features/investigations/service";
+import { addEvidence } from "@/features/evidence/service";
 import { ApiError } from "@/lib/server/api-client";
-import type { CaseAction } from "@/lib/api/types";
+import type { CaseAction, EvidenceType } from "@/lib/api/types";
+
+const EVIDENCE_TYPES: EvidenceType[] = ["LOG", "SCREENSHOT", "FILE", "URL", "COMMAND_OUTPUT", "OTHER"];
 
 export interface CaseActionState {
   error?: string;
@@ -185,6 +188,41 @@ export async function linkEvidenceAction(
 
   try {
     await linkEvidenceToHypothesis(caseId, hypothesisId, evidenceId);
+  } catch (error) {
+    if (error instanceof ApiError) {
+      return { error: error.message };
+    }
+    return { error: "Something went wrong. Please try again." };
+  }
+  redirect(`/cases/${caseId}`);
+}
+
+export async function addEvidenceAction(
+  _prevState: CaseActionState,
+  formData: FormData,
+): Promise<CaseActionState> {
+  const caseId = caseIdOf(formData);
+  const type = String(formData.get("type") ?? "") as EvidenceType;
+  const source = String(formData.get("source") ?? "").trim();
+  const content = String(formData.get("content") ?? "").trim();
+  const timestampRaw = String(formData.get("timestamp") ?? "");
+
+  if (!EVIDENCE_TYPES.includes(type)) {
+    return { error: "Evidence type is required." };
+  }
+  if (!source) {
+    return { error: "Source is required." };
+  }
+  if (!content) {
+    return { error: "Content is required." };
+  }
+  const timestampMs = new Date(timestampRaw).getTime();
+  if (!timestampRaw || Number.isNaN(timestampMs)) {
+    return { error: "A valid timestamp is required." };
+  }
+
+  try {
+    await addEvidence(caseId, { type, source, content, timestamp: new Date(timestampMs).toISOString() });
   } catch (error) {
     if (error instanceof ApiError) {
       return { error: error.message };
