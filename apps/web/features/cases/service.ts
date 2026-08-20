@@ -35,6 +35,7 @@ export interface CreateCaseInput {
   title: string;
   severity: Severity;
   assigneeId?: string;
+  alertIds?: string[];
 }
 
 export async function createCase(input: CreateCaseInput): Promise<CaseWithAlerts> {
@@ -63,6 +64,13 @@ export async function reassignCase(id: string, assigneeId: string): Promise<Case
   return apiFetch<CaseWithAlerts>(`/cases/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify({ assigneeId }),
+  });
+}
+
+export async function linkAlertToCase(caseId: string, alertId: string): Promise<CaseWithAlerts> {
+  return apiFetch<CaseWithAlerts>(`/cases/${encodeURIComponent(caseId)}/alerts`, {
+    method: "POST",
+    body: JSON.stringify({ alertId }),
   });
 }
 

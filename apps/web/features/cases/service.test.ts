@@ -10,6 +10,7 @@ import {
   addNote,
   createCase,
   getCase,
+  linkAlertToCase,
   listCases,
   listCaseTimelineEntries,
   reassignCase,
@@ -58,6 +59,24 @@ describe("cases service", () => {
     expect(apiFetch).toHaveBeenCalledWith("/cases", {
       method: "POST",
       body: JSON.stringify({ title: "Suspicious login", severity: "high" }),
+    });
+  });
+
+  it("createCase includes alertIds when provided", async () => {
+    (apiFetch as jest.Mock).mockResolvedValue({ id: "c1" });
+    await createCase({ title: "x", severity: "high", alertIds: ["a1", "a2"] });
+    expect(apiFetch).toHaveBeenCalledWith("/cases", {
+      method: "POST",
+      body: JSON.stringify({ title: "x", severity: "high", alertIds: ["a1", "a2"] }),
+    });
+  });
+
+  it("linkAlertToCase posts the alertId to /cases/:id/alerts", async () => {
+    (apiFetch as jest.Mock).mockResolvedValue({ id: "c1" });
+    await linkAlertToCase("c1", "a1");
+    expect(apiFetch).toHaveBeenCalledWith("/cases/c1/alerts", {
+      method: "POST",
+      body: JSON.stringify({ alertId: "a1" }),
     });
   });
 
