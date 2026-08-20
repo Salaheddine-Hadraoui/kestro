@@ -382,11 +382,18 @@ A read-only architectural/product discovery of the Alerts domain (see conversati
 
 ## Current task
 
-None in progress. **Phase 2 — Milestone 2: Cases Workspace**, its follow-up UI design-system hardening pass, and the **Alert Triage Workspace** above are all complete and verified. Milestone 1: Operations Workspace Foundation and the Hypothesis ↔ Evidence milestone remain complete and verified as before (see their respective sections above).
+**IN PROGRESS (paused mid-execution): Phase 2 — Investigation Workspace** (Hypotheses + Evidence sections on the case detail page). Plan: `docs/superpowers/plans/2026-08-20-investigation-workspace.md`. Being executed via the subagent-driven-development workflow, one commit per task, task-reviewed after each. Progress as of this checkpoint:
+
+- Task 1 (types + `HYPOTHESIS_STATUS_BADGE_TONE`) — complete, reviewed clean. Commit `120077b`.
+- Task 2 (Investigations + Evidence service layers) — complete, reviewed clean (2 deferred Minor findings, non-blocking). Commit `623c251`.
+- Task 3 (hypothesis Server Actions + forms) — **implemented (commit `cf0575e`), but its task review was interrupted mid-run and has not yet returned a verdict.** Full `apps/web` suite passes (182/182) and `tsc --noEmit` is clean at this commit, but per this workflow's own gate, Task 3 is not to be treated as done until a reviewer verdict lands and any findings are resolved.
+- Tasks 4-6 (evidence action/form, case detail page integration, full verification + live walkthrough + this doc's completion write-up) have not started.
+
+Session paused here on token-budget exhaustion, not a blocker in the work itself. Full resume state, including the exact next command to run, lives in the SDD ledger: `.superpowers/sdd/2026-08-20-investigation-workspace/progress.md`. Zero backend changes and no uncommitted work exist at this checkpoint — `main` is clean at commit `cf0575e`.
 
 ## Next planned milestone
 
-Not yet chosen. With the app shell (Milestone 1), the Cases Workspace (Milestone 2), its UI hardening pass, and the Alert Triage Workspace now in place, both entry points into the documented Alert → Case → Investigation chain have a UI — the next natural depth-first step per CLAUDE.md's terminology chain is an Investigation Workspace (Hypothesis/Evidence UI) exposing the process that already happens *inside* an existing Case, per the Alert Triage Workspace's own discovery notes. That is not yet scoped, though. Still-open alternatives remain available: a Dashboard, Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
+The current milestone (Investigation Workspace, see above) is the answer to "what's next" as of this writing — it is in progress, not merely planned. Once it completes, still-open alternatives from before it was scoped remain available for whatever comes after: a Dashboard, Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
 
 ## Known technical debt / limitations / follow-ups
 
