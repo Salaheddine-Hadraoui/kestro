@@ -12,14 +12,19 @@ const initialState: CaseFormState = {};
 export function CaseForm({
   role,
   activeUsers,
+  alertIds = [],
 }: {
   role: UserRole;
   activeUsers: { id: string; name: string }[];
+  alertIds?: string[];
 }) {
   const [state, formAction, pending] = useActionState(createCaseAction, initialState);
 
   return (
     <form action={formAction} className="max-w-md space-y-4">
+      {alertIds.map((id) => (
+        <input key={id} type="hidden" name="alertIds" value={id} />
+      ))}
       <TextField label="Title" name="title" required maxLength={200} />
       <div className="space-y-1">
         <label htmlFor="severity" className="block text-sm font-medium">

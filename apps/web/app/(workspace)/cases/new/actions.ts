@@ -16,6 +16,7 @@ export async function createCaseAction(
   const title = String(formData.get("title") ?? "").trim();
   const severity = String(formData.get("severity") ?? "") as Severity;
   const assigneeId = formData.get("assigneeId");
+  const alertIds = formData.getAll("alertIds").map((value) => String(value));
 
   if (!title) {
     return { error: "Title is required." };
@@ -30,6 +31,7 @@ export async function createCaseAction(
       title,
       severity,
       assigneeId: typeof assigneeId === "string" && assigneeId ? assigneeId : undefined,
+      alertIds: alertIds.length > 0 ? alertIds : undefined,
     });
   } catch (error) {
     if (error instanceof ApiError) {

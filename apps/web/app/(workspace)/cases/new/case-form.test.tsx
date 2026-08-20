@@ -29,4 +29,16 @@ describe("CaseForm", () => {
     expect(screen.getByLabelText(/title/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/severity/i)).toBeInTheDocument();
   });
+
+  it("renders a hidden field for each given alertId, and none when omitted", () => {
+    const { container, rerender } = render(
+      <CaseForm role="analyst" activeUsers={[]} alertIds={["a1", "a2"]} />,
+    );
+    const hiddenInputs = container.querySelectorAll('input[type="hidden"][name="alertIds"]');
+    expect(hiddenInputs).toHaveLength(2);
+    expect([...hiddenInputs].map((el) => (el as HTMLInputElement).value)).toEqual(["a1", "a2"]);
+
+    rerender(<CaseForm role="analyst" activeUsers={[]} />);
+    expect(container.querySelectorAll('input[type="hidden"][name="alertIds"]')).toHaveLength(0);
+  });
 });
