@@ -11,10 +11,18 @@ jest.mock("../../../../features/cases/service", () => ({
   listCaseTimelineEntries: jest.fn(),
 }));
 jest.mock("../../../../features/users/service", () => ({ listUsers: jest.fn() }));
+jest.mock("../../../../features/investigations/service", () => ({
+  listHypotheses: jest.fn(),
+}));
+jest.mock("../../../../features/evidence/service", () => ({
+  listEvidence: jest.fn(),
+}));
 
 import { verifySession } from "../../../../features/auth/dal";
 import { getCase, listCaseTimelineEntries } from "../../../../features/cases/service";
 import { listUsers } from "../../../../features/users/service";
+import { listHypotheses } from "../../../../features/investigations/service";
+import { listEvidence } from "../../../../features/evidence/service";
 import { ApiError } from "@/lib/server/api-client";
 import CaseDetailPage from "./page";
 
@@ -36,6 +44,8 @@ describe("CaseDetailPage", () => {
     (verifySession as jest.Mock).mockResolvedValue({ id: "u1", name: "Ada Lovelace", role: "analyst" });
     (listUsers as jest.Mock).mockResolvedValue([{ id: "u1", name: "Ada Lovelace", role: "analyst", disabledAt: null }]);
     (listCaseTimelineEntries as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 100, offset: 0 });
+    (listHypotheses as jest.Mock).mockResolvedValue([]);
+    (listEvidence as jest.Mock).mockResolvedValue([]);
   });
 
   it("renders the case's title, status, severity, and assignee name", async () => {
@@ -174,5 +184,169 @@ describe("CaseDetailPage", () => {
 
     expect(screen.queryByRole("button", { name: /add note/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /add comment/i })).not.toBeInTheDocument();
+  });
+
+  it("renders hypotheses with their status badge", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    (listHypotheses as jest.Mock).mockResolvedValue([
+      {
+        id: "h1",
+        caseId: "c1",
+        authorId: "u1",
+        statement: "Phishing led to credential theft",
+        status: "proposed",
+        conclusionStatement: null,
+        resolvedAt: null,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      },
+    ]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByText("Phishing led to credential theft")).toBeInTheDocument();
+    expect(screen.getByText("proposed")).toBeInTheDocument();
+  });
+
+  it("renders a message when no hypotheses have been proposed", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+    expect(screen.getByText(/no hypotheses proposed yet/i)).toBeInTheDocument();
+  });
+
+  it("shows validate/reject/link-evidence controls only for a proposed hypothesis, on a non-resolved case", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase); // status: INVESTIGATING
+    (listHypotheses as jest.Mock).mockResolvedValue([
+      {
+        id: "h1",
+        caseId: "c1",
+        authorId: "u1",
+        statement: "Proposed one",
+        status: "proposed",
+        conclusionStatement: null,
+        resolvedAt: null,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      },
+      {
+        id: "h2",
+        caseId: "c1",
+        authorId: "u1",
+        statement: "Already validated",
+        status: "validated",
+        conclusionStatement: "Confirmed via logs",
+        resolvedAt: "2026-08-20T01:00:00.000Z",
+        createdAt: "2026-08-20T00:00:00.000Z",
+      },
+    ]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByLabelText(/^conclusion$/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^reject$/i })).toBeInTheDocument();
+    expect(screen.getByText("Confirmed via logs")).toBeInTheDocument();
+  });
+
+  it("hides propose/validate/reject/link-evidence controls when the case is resolved", async () => {
+    (getCase as jest.Mock).mockResolvedValue({ ...kase, status: "RESOLVED", resolutionSummary: "Done." });
+    (listHypotheses as jest.Mock).mockResolvedValue([
+      {
+        id: "h1",
+        caseId: "c1",
+        authorId: "u1",
+        statement: "Proposed one",
+        status: "proposed",
+        conclusionStatement: null,
+        resolvedAt: null,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      },
+    ]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.queryByLabelText(/propose a hypothesis/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^conclusion$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^reject$/i })).not.toBeInTheDocument();
+  });
+
+  it("renders evidence with type, source, and timestamp", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    (listEvidence as jest.Mock).mockResolvedValue([
+      {
+        id: "e1",
+        caseId: "c1",
+        timelineEventId: "te1",
+        hypothesisId: null,
+        type: "LOG",
+        source: "auth-server",
+        content: "Failed login at 03:00 UTC",
+        timestamp: "2026-08-20T03:00:00.000Z",
+        authorId: "u1",
+        createdAt: "2026-08-20T03:05:00.000Z",
+      },
+    ]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByText(/auth-server/)).toBeInTheDocument();
+    expect(screen.getByText("Failed login at 03:00 UTC")).toBeInTheDocument();
+  });
+
+  it("renders a message when no evidence has been recorded", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+    expect(screen.getByText(/no evidence recorded yet/i)).toBeInTheDocument();
+  });
+
+  it("shows which hypothesis a piece of evidence is linked to", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    (listHypotheses as jest.Mock).mockResolvedValue([
+      {
+        id: "h1",
+        caseId: "c1",
+        authorId: "u1",
+        statement: "Phishing led to credential theft",
+        status: "proposed",
+        conclusionStatement: null,
+        resolvedAt: null,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      },
+    ]);
+    (listEvidence as jest.Mock).mockResolvedValue([
+      {
+        id: "e1",
+        caseId: "c1",
+        timelineEventId: "te1",
+        hypothesisId: "h1",
+        type: "LOG",
+        source: "auth-server",
+        content: "Failed login at 03:00 UTC",
+        timestamp: "2026-08-20T03:00:00.000Z",
+        authorId: "u1",
+        createdAt: "2026-08-20T03:05:00.000Z",
+      },
+    ]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByText(/linked to hypothesis/i)).toBeInTheDocument();
+    // The hypothesis statement also appears verbatim in the Hypotheses section above, so
+    // match the full "Linked to hypothesis: <statement>" text to uniquely target the
+    // Evidence section's reference rather than the standalone hypothesis statement.
+    expect(
+      screen.getByText(/linked to hypothesis:\s*phishing led to credential theft/i),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the add-evidence form when the case is resolved", async () => {
+    (getCase as jest.Mock).mockResolvedValue({ ...kase, status: "RESOLVED", resolutionSummary: "Done." });
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+    expect(screen.queryByLabelText(/^type$/i)).not.toBeInTheDocument();
   });
 });
