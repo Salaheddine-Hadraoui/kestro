@@ -4,6 +4,8 @@ import { listCases } from "@/features/cases/service";
 import { listUsers } from "@/features/users/service";
 import { buildUserNameMap, resolveUserName } from "@/lib/format-user";
 import { EmptyState } from "@/components/ui/empty-state";
+import { Badge } from "@/components/ui/badge";
+import { CASE_STATUS_BADGE_TONE, SEVERITY_BADGE_TONE } from "@/lib/badge-tones";
 import type { CaseStatus, Severity } from "@/lib/api/types";
 
 const STATUSES: CaseStatus[] = [
@@ -148,8 +150,12 @@ export default async function CasesPage({
                     {kase.title}
                   </Link>
                 </td>
-                <td className="py-2">{kase.status}</td>
-                <td className="py-2">{kase.severity}</td>
+                <td className="py-2">
+                  <Badge tone={CASE_STATUS_BADGE_TONE[kase.status]}>{kase.status}</Badge>
+                </td>
+                <td className="py-2">
+                  <Badge tone={SEVERITY_BADGE_TONE[kase.severity]}>{kase.severity}</Badge>
+                </td>
                 <td className="py-2">{resolveUserName(userNames, kase.assigneeId)}</td>
               </tr>
             ))}

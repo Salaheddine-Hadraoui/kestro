@@ -13,4 +13,9 @@ describe("Button", () => {
     render(<Button disabled>Sign in</Button>);
     expect(screen.getByRole("button")).toBeDisabled();
   });
+
+  it("applies the warning variant's amber styling", () => {
+    render(<Button variant="warning">Escalate</Button>);
+    expect(screen.getByRole("button", { name: "Escalate" })).toHaveClass("bg-amber-600");
+  });
 });

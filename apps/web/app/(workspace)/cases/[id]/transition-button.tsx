@@ -2,7 +2,7 @@
 
 import { useActionState } from "react";
 import { transitionCaseAction, type CaseActionState } from "./actions";
-import { Button } from "@/components/ui/button";
+import { Button, type ButtonVariant } from "@/components/ui/button";
 import { FormError } from "@/components/ui/form-error";
 import type { CaseTransitionRule } from "@/lib/case-transitions";
 
@@ -17,6 +17,23 @@ const ACTION_LABELS: Record<CaseTransitionRule["action"], string> = {
   begin_verification: "Begin verification",
   resolve: "Resolve",
   reopen: "Reopen",
+};
+
+// Display-only semantic emphasis -- does not affect which actions are
+// available (getAvailableActions/CASE_TRANSITIONS remain the sole source of
+// truth for that). "resolve" gets the app's strongest emphasis as the
+// terminal action; "escalate"/"accept_escalation"/"reopen" get the warning
+// treatment as urgency-raising or flow-overriding actions. Everything else
+// stays the routine "secondary" styling.
+const ACTION_VARIANT: Record<CaseTransitionRule["action"], ButtonVariant> = {
+  begin_triage: "secondary",
+  start_investigation: "secondary",
+  escalate: "warning",
+  accept_escalation: "warning",
+  begin_mitigation: "secondary",
+  begin_verification: "secondary",
+  resolve: "primary",
+  reopen: "warning",
 };
 
 export function TransitionButton({
@@ -47,7 +64,7 @@ export function TransitionButton({
         </div>
       )}
       {state.error && <FormError message={state.error} />}
-      <Button type="submit" variant="secondary" disabled={pending}>
+      <Button type="submit" variant={ACTION_VARIANT[rule.action]} disabled={pending}>
         {pending ? "Working…" : ACTION_LABELS[rule.action]}
       </Button>
     </form>

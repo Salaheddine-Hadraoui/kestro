@@ -40,4 +40,24 @@ describe("TransitionButton", () => {
     const hidden = container.querySelector('input[type="hidden"][name="caseId"]');
     expect(hidden).toHaveValue("c1");
   });
+
+  it("gives resolve its strongest emphasis and escalate the warning treatment", () => {
+    render(<TransitionButton caseId="c1" rule={resolveRule} />);
+    expect(screen.getByRole("button", { name: /resolve/i })).toHaveClass("bg-black");
+
+    const escalateRule: CaseTransitionRule = {
+      action: "escalate",
+      from: "TRIAGING",
+      to: "ESCALATED",
+      roles: ["analyst", "lead"],
+      requiresResolutionSummary: false,
+    };
+    render(<TransitionButton caseId="c1" rule={escalateRule} />);
+    expect(screen.getByRole("button", { name: /escalate/i })).toHaveClass("bg-amber-600");
+  });
+
+  it("keeps a routine forward transition on the secondary (unemphasized) styling", () => {
+    render(<TransitionButton caseId="c1" rule={rule} />);
+    expect(screen.getByRole("button", { name: /begin triage/i })).toHaveClass("border-black/20");
+  });
 });
