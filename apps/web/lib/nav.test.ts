@@ -9,11 +9,16 @@ describe("getVisibleNavItems", () => {
   });
 
   it("only lists routes that actually exist in this milestone", () => {
-    expect(NAV_ITEMS.map((item) => item.href)).toEqual(["/", "/cases"]);
+    expect(NAV_ITEMS.map((item) => item.href)).toEqual(["/", "/cases", "/alerts"]);
   });
 
   it("includes Cases for both analyst and lead", () => {
     expect(getVisibleNavItems("analyst").map((item) => item.href)).toContain("/cases");
     expect(getVisibleNavItems("lead").map((item) => item.href)).toContain("/cases");
+  });
+
+  it("includes Alerts for both analyst and lead", () => {
+    expect(getVisibleNavItems("analyst").map((item) => item.href)).toContain("/alerts");
+    expect(getVisibleNavItems("lead").map((item) => item.href)).toContain("/alerts");
   });
 });
