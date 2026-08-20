@@ -57,11 +57,11 @@ against Case-scoped evidence (see "Hypothesis ↔ Evidence milestone" below).
 | Auth | Done | JWT access/refresh, refresh-token rotation + revocation, RolesGuard infra |
 | Users | Done | CRUD, Lead-gated management, soft-delete (`disabledAt`) |
 | Alerts | Done | create/list/get/dismiss; case-linking explicitly deferred (now resolved by Cases) |
-| Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation), visibility scoping, freeform notes and comments (hardening pass). Zero schema changes beyond Milestone-1 foundation. |
+| Cases | Done | full lifecycle state machine, assignment/reassignment, escalation, alert-linking (creation-time and post-creation, now with a race-safe 409 on concurrent linking — see "Alert Triage Workspace" below), visibility scoping, freeform notes and comments (hardening pass). Zero schema changes beyond Milestone-1 foundation. |
 | Investigations | Done | Hypothesis propose/validate/reject nested under a case, reusing Cases' visibility rule; one new table (`hypotheses`), zero changes to Case/Alert/User. Now also owns linking Case-scoped Evidence to a Hypothesis for evaluation (Hypothesis ↔ Evidence milestone). |
 | Evidence | Done | text-based evidence create/list/get nested under a case; each creation also writes the matching `evidence_added` timeline event (required by the pre-existing schema); zero schema changes — the Milestone-1 foundation already had the complete `evidence` table. Now carries an optional `hypothesisId` (Hypothesis ↔ Evidence milestone), set only via Investigations' link action, never at evidence-creation time. |
 | Timeline | Done | `GET /cases/:caseId/timeline`, read-only, nested under a case; reuses Cases' visibility check; paginated (`limit`/`offset`), deterministic chronological order, author joined in one query; zero schema changes — the Milestone-1 foundation's `timeline_events` table and existing indexes already supported this. |
-| Web (Next.js app shell) | Done | Login, protected workspace layout, role-aware nav, UI primitives, BFF session/refresh architecture (see "Operations Workspace Foundation — implementation notes" below); no Alerts/Cases/Dashboard/Investigation/Evidence/Timeline UI yet |
+| Web (Next.js app shell) | Done | Login, protected workspace layout, role-aware nav, UI primitives, BFF session/refresh architecture (see "Operations Workspace Foundation — implementation notes" below); Cases Workspace — case list with filters, case detail with lifecycle transitions/reassignment/notes/comments, case creation (see "Cases Workspace (Milestone 2) — implementation notes" below); Alert Triage Workspace — alert list with filters, alert detail with dismiss/link-to-case, create-case-from-one-or-more-alerts (see "Alert Triage Workspace" below); no Dashboard/Investigation/Evidence/Timeline UI yet |
 | Playbooks, Knowledge, AI, Integrations | Not scoped | future phases per docs/ROADMAP.md — do not scaffold |
 
 ## Milestone 1 hardening pass
@@ -219,6 +219,91 @@ hand against a live `next dev` server plus the real NestJS API during
 implementation — no unit test can cover it, which is exactly why the
 Next-upgrade caveat above is written down.
 
+### Cases Workspace (Milestone 2) — implementation notes
+
+**What was built** (all under `apps/web/`, on top of the Operations
+Workspace Foundation): a case list page (`app/(workspace)/cases/page.tsx`)
+with status/severity/assignee filters, role-scoped exactly as the backend
+already scopes `GET /v1/cases` (Analysts see only their own assigned cases;
+Leads see everyone's and get an assignee filter); a case detail page
+(`app/(workspace)/cases/[id]/page.tsx`) rendering full case fields,
+role-and-status-gated lifecycle transition buttons
+(`transition-button.tsx`, driven by `getAvailableActions(status, role)`),
+a Lead-only reassignment form (`reassign-form.tsx`), and a Notes & Comments
+section with add-note/add-comment forms (`case-entry-form.tsx`) that
+disappear once a case is `RESOLVED`; a case creation page
+(`app/(workspace)/cases/new/page.tsx`, no assignee field for Analysts, who
+always self-assign); a typed service layer (`features/cases/service.ts`)
+wrapping `listCases`/`getCase`/`createCase`/`transitionCase`/
+`reassignCase`/`addNote`/`addComment`/`listCaseTimelineEntries` over the
+existing Cases/Timeline API, plus `extractHumanEntries` for the
+notes/comments decision below; a new "Cases" nav item.
+
+**Notes/comments via filtered Timeline, not a Timeline UI (product decision
+(b))** — the backend has no dedicated notes/comments read endpoint, only
+`GET /cases/:caseId/timeline`, which interleaves human-authored `note`/
+`comment` entries with system-generated ones (`status_change`,
+`assignee_changed`, `hypothesis_*`, etc.). Rather than add a backend
+endpoint (out of scope — this milestone makes zero backend changes) or
+build a full Timeline UI (a separate, unscoped capability), the Notes &
+Comments section calls the existing Timeline endpoint and filters
+client-side (`extractHumanEntries`) to just `note` (discriminated by its
+`event: 'note_added'` content marker, since `note` is overloaded for
+`assignee_changed`) and `comment` entries. This is deliberately **not** a
+Timeline UI: no system events, no pagination beyond what the filtered list
+needs, and no ordering/rendering decisions beyond "show the human entries
+attributed to their author." A full Timeline UI remains unscoped.
+
+**Zero backend changes**: every route this milestone consumes
+(`POST /v1/cases`, `GET /v1/cases`, `GET /v1/cases/:id`,
+`POST /v1/cases/:id/transitions`, `PATCH /v1/cases/:id` for reassignment,
+`POST /v1/cases/:id/notes`, `POST /v1/cases/:id/comments`,
+`GET /v1/cases/:caseId/timeline`) already existed exactly as built in
+Milestone 1 and the Milestone 1 hardening pass; nothing in `apps/api/` was
+touched.
+
+**Verification (Task 10 — full-suite + live walkthrough)**: from
+`apps/web/` — `npx jest` 105/105 tests passing across 27 suites;
+`npx tsc --noEmit` clean; `npm run build` (Next 16.3.0/Turbopack) clean,
+emitting routes `/`, `/_not-found`, `/cases`, `/cases/[id]`, `/cases/new`,
+`/login`, `/session-expired` and the Proxy (Middleware); `npm run lint`
+(`eslint`) clean. From `apps/api/` — `npx jest` 125/125 (10 suites) and
+`npm run test:e2e` 98/98 (8 suites) both passing unmodified, confirming
+this milestone made no backend regressions; `prisma validate` and
+`prisma migrate status` both clean (7 migrations, schema up to date),
+confirming zero schema/backend drift.
+
+A live walkthrough was run against the real NestJS API (`npm run start:dev`)
+and a live `next dev` server, using `curl` in place of a browser (no
+browser-automation tool was available in this environment): two throwaway
+Analyst accounts and a throwaway Lead account were created directly via
+Prisma (mirroring the e2e tests' fixture pattern, since user creation is
+itself Lead-gated via the API and the dev DB started empty), then, as one
+Analyst — logged in, created a case (self-assigned, `201`), listed cases
+(scoped correctly, `200`), fetched case detail (`200`), ran `begin_triage`
+(`200`, status → `TRIAGING`), added a note and a comment (`201` each,
+both appearing author-joined in `GET .../timeline`), ran the remaining
+forward transitions (`start_investigation` → `begin_mitigation` →
+`begin_verification` → `resolve` with a `resolutionSummary`, all `200`,
+final status `RESOLVED` with the summary set), confirmed a further note
+attempt on the resolved case was rejected (`409`), confirmed a second
+Analyst got `403` fetching the first Analyst's case, and confirmed a
+nonexistent case id returned `404`. Every response matched what Task 4's
+service layer assumes — no route/shape mismatch found. Separately, the
+frontend's own protected-route wiring was confirmed live: `/login` renders
+the real login form (`name="email"`), and `/cases`, `/cases/new`, and
+`/cases/[id]` all `307`-redirect to `/login` when requested without a
+session cookie, proving the proxy/auth boundary extends correctly to the
+new Cases routes. All throwaway rows (users, the one case, its timeline
+events, refresh tokens) were deleted afterward and the dev DB was confirmed
+back to empty (0 users/cases/timeline_events/refresh_tokens), matching how
+it was found; both dev servers were then stopped. The full click-through
+browser walkthrough (login via the UI, create → list → detail →
+transition → note/comment → reassign) was **not** performed, since no
+browser-automation tool was available in this environment — the API-level
+walkthrough above plus the protected-route checks stand as the verification
+evidence in its place.
+
 ## Key architectural/domain decisions already made
 
 - **Primary keys**: UUID across all Milestone 1 tables, `@default(uuid())` (client-side generation, not DB-side).
@@ -269,13 +354,39 @@ Next-upgrade caveat above is written down.
 - **`VERIFYING → MITIGATING` loop-back** and **alert-linkable-to-multiple-cases** — both explicitly open in docs/ROADMAP.md, unaffected by anything built so far.
 - **Phase 1's other named items** (@mentions, search/filter, case export, richer metrics — docs/ROADMAP.md) remain fully unscoped. Comments are no longer on this list (hardening pass), and Hypothesis↔Evidence linking is no longer on this list (this milestone).
 
+### UI design-system hardening pass (post–Milestone 2)
+
+A read-only UI/UX audit was run against the Cases Workspace (Milestone 2, `615aa97`) before starting the next product milestone (see conversation history — not a committed doc). It found the underlying architecture (Server Components, typed service layer, role-scoping) solid, but flagged that severity/status had zero visual semantics (plain text only), lifecycle action buttons had no risk differentiation, the Cases list/detail markup duplicated the same border/heading patterns inline with no shared primitive, and two leftover default-`create-next-app` artifacts (an unused Arial `body` rule fighting the already-loaded Geist font, and no custom `not-found.tsx`) made the app read as unfinished boilerplate. Recommendation was a small, scoped polish pass before the next milestone, not a restructuring.
+
+**What was built** (all under `apps/web/`, UI-only — no backend, auth, Server Action, or case-transition-table changes):
+- `components/ui/badge.tsx` — a generic `Badge({ tone, children })` primitive (tones: `neutral | blue | amber | red | green | purple | cyan`), domain-agnostic so a future Alerts/Investigation/Evidence UI can reuse it.
+- `lib/badge-tones.ts` — `SEVERITY_BADGE_TONE` (low=neutral, medium=blue, high=amber, critical=red) and `CASE_STATUS_BADGE_TONE` (OPEN=neutral, TRIAGING=blue, INVESTIGATING=purple, ESCALATED=red, MITIGATING=amber, VERIFYING=cyan, RESOLVED=green), applied to the Cases list table and the case detail header/linked-alerts severity.
+- `components/ui/card.tsx` and `components/ui/section.tsx` — extracted from the case detail page's repeated border-box and uppercase-heading markup (resolution summary, linked alerts, notes/comments list items; the three `<section>` blocks), reusable by a future Investigation/Evidence detail page.
+- `components/ui/button.tsx` gained a third `warning` (amber) variant; `transition-button.tsx` maps it to `escalate`/`accept_escalation`/`reopen`, and maps `resolve` to the existing `primary` (strongest emphasis, terminal action) — routine forward transitions stay `secondary`. Purely a display-layer mapping; `getAvailableActions`/`CASE_TRANSITIONS` (the actual authorization/transition table) were not touched.
+- `app/globals.css`'s `body` rule now reads `font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif` instead of hardcoded `Arial, Helvetica, sans-serif` — the Geist font `layout.tsx` already loads is now actually applied, with Arial/Helvetica as its fallback rather than a silent override.
+- `app/not-found.tsx` — a Kestro-styled 404 (`EmptyState` + a link home) for any unmatched route, replacing Next's default page. Deliberately does not call `verifySession`, since Next renders it for any unmatched route regardless of auth state.
+
+**Verification**: `npx jest` 126/126 passing across 32 suites (was 105/27; +21 tests for the five new/changed components plus the transition-button/button variant assertions), `npx tsc --noEmit` clean, `npm run lint` clean. A live walkthrough was then run against the real NestJS API and a live `next dev` server: a throwaway Lead, Analyst, and seven cases spanning all four severities and seven lifecycle statuses were inserted directly via `psql` (Prisma's generated client can't load under plain `ts-node`, the same WASM/CJS constraint noted under "Test strategy" below, so the direct-SQL route the project already uses for real-DB smoke-testing was used instead); logging in as each role through the actual login Server Action (via curl, matching the `$ACTION_*` hidden-field protocol Next 16 renders for progressive enhancement, since no browser-automation tool was available in this environment) and fetching the real rendered Cases list and case detail pages over HTTP confirmed: each severity/status pair renders with its intended distinct badge color; the Analyst's list correctly omitted the Lead-only case (role-scoping unaffected); `resolve` rendered with `bg-black`/`dark:bg-white` and `accept_escalation` with `bg-amber-600`/`dark:bg-amber-500`, exactly as designed; the compiled CSS's `body` rule showed the corrected `font-family` chain; and an authenticated request to a nonexistent path returned `404` with the new `not-found.tsx` content, while an unauthenticated one still redirected to `/login` first (the proxy's existing protection, unaffected). All throwaway rows were deleted afterward and the dev DB confirmed back to empty (0 users/cases/timeline_events/refresh_tokens); both dev servers were then stopped.
+
+### Alert Triage Workspace
+
+A read-only architectural/product discovery of the Alerts domain (see conversation history — not a committed doc) was run before choosing the next Phase 2 milestone, to determine whether an "Alert Triage Workspace" connecting Alert → triage/validation → Case → Investigation was the right next step rather than assuming Alerts UI was next just because it's the first documented workflow step. It found the backend fully ready for the core triage loop (list/filter/dismiss/link/create-case-from-alert(s), all already implemented since Milestone 1), the frontend fully ready (every needed UI primitive and pattern already existed from the Cases Workspace), and exactly one real gap worth fixing alongside: the alert-linking race (`assertAlertsLinkable` reads status outside its write transaction) maps to an unhandled 500 instead of a 409 under concurrent linking — the same TOCTOU already recorded under "Known technical debt" below. The recommendation — approved as-is — was to build the Alert Triage Workspace next and fix that one race alongside it, with no other backend change, no AI, correlation/deduplication, alert ownership/visibility scoping, search, dashboard/metrics, bulk operations, or Investigation/Evidence UI in this milestone.
+
+**Backend hardening** (the only backend change in this milestone): `CasesService.createCaseAlertLink()` (new private helper in `cases.service.ts`, used by both `create()`'s alert-linking loop and `linkAlert()`) now catches a `Prisma.PrismaClientKnownRequestError` with code `P2002` on the `case_alerts.alert_id` unique-constraint race and rethrows it as `ConflictException` (409), instead of letting it escape as an unmapped 500. No endpoint, schema, or authorization change; the race itself (the check happening outside the write transaction) is unchanged — only its failure mode is now correct. Covered by two new unit tests (in `cases.service.spec.ts`, following the exact same synchronous-mock precedent already established by `auth.service.spec.ts`'s refresh-token race test — deliberately not an e2e concurrency test, matching that precedent) that pre-seed a colliding `CaseAlert` row to force the mock through the real P2002 path.
+
+**What was built** (all under `apps/web/`, on top of the Cases Workspace and its UI hardening pass): an alerts list page (`app/(workspace)/alerts/page.tsx`) with status/severity filters and pagination (mirroring the Cases list's exact pattern), a read-only table with `Badge`-colored status/severity cells, and a checkbox per `new`-status alert (none for `linked`/`dismissed` rows) feeding a second, sibling `<form method="GET" action="/cases/new">` — a plain navigation form, not a Server Action, since selecting alerts here is navigation to case creation, not a mutation itself; an alert detail page (`app/(workspace)/alerts/[id]/page.tsx`) showing full alert fields including a pretty-printed raw payload, a dismiss form (`dismiss-form.tsx`, amber `warning`-variant button — dismiss is irreversible, given the same visual emphasis as `resolve`/`escalate` elsewhere) and a link-to-existing-case form (`link-to-case-form.tsx`, a `<select>` populated from the analyst's own `GET /cases` visibility scope, excluding `RESOLVED` cases) shown only for a `new` alert, a "Create case from this alert" link for a `new` alert, and terminal-state-only messaging (dismisser name/reason/timestamp for `dismissed`; a plain "linked to a case" message for `linked`, with no attempt to identify *which* case — `GET /alerts/:id` has no path that includes that relation, an accepted limitation, not a bug); a typed `features/alerts/service.ts` (`listAlerts`/`getAlert`/`dismissAlert`) plus `linkAlertToCase` and an `alertIds?: string[]` field on `CreateCaseInput` added to the existing `features/cases/service.ts`; an extension of `app/(workspace)/cases/new/` (`case-form.tsx`, `actions.ts`, `page.tsx`) to read one-or-many `alertIds` from `searchParams`, resolve each via `getAlert` (silently dropping any that don't resolve — a stale/since-linked/since-dismissed id becomes fewer linked alerts, never a broken reference), preview them, and pass only the successfully-resolved ids through to `createCase`; a new "Alerts" nav entry.
+
+**Execution**: implemented via Subagent-Driven Development (fresh implementer subagent per task, task-scoped spec+quality review after each, all reviews returned clean with only trivial, non-blocking Minor notes) across 8 tasks (1 backend, 7 frontend) plus this verification/docs task. An early visual checkpoint was run against real dev servers after the list/detail UI first became usable (before the case-creation integration existed), confirming correct badge colors, correct action visibility per alert status, and working end-to-end Server Action submissions, before continuing to the remaining tasks.
+
+**Verification**: from `apps/api/` — `npx jest` 127/127 (was 125; +2 for the P2002 regression), `npm run test:e2e` 98/98 unmodified, `tsc --noEmit`/`eslint`/`prisma validate`/`prisma migrate status` all clean (zero schema drift — this milestone made no migration). From `apps/web/` — `npx jest` 162/162 across 38 suites (was 126; +36 across the new service/component/page tests), `tsc --noEmit`/`eslint` clean, `next build` clean, emitting `/alerts` and `/alerts/[id]` alongside every existing route. A final live walkthrough was run against the real NestJS API and a live `next dev` server (via curl against the actual rendered HTML and real Server Action submissions — matching the `$ACTION_*` hidden-field protocol Next 16 renders for progressive enhancement, since no browser-automation tool was available in this environment): a throwaway Analyst and several alerts were created directly through the real API (`POST /alerts`, no direct-DB alert seeding needed, since Alerts carry no role gating — only the one throwaway user itself required a direct SQL insert, since user creation is Lead-gated and the dev DB starts empty); the list page rendered checkboxes only on `new` rows with correct badge colors; the detail page correctly showed each of the three states (`new` with working Dismiss/Link-to-case forms and a working create-case link, `dismissed` with the resolved dismisser name, `linked` with no case identification attempted); submitting the real Dismiss and Link-to-case Server Actions produced the correct redirects and state changes, confirmed via the API; and selecting two alerts on the list page and following that selection through `/cases/new` produced a case with both alerts correctly linked (and the one alert left unselected correctly untouched), exercising this milestone's entire Alert → Case handoff end-to-end. All throwaway rows were deleted afterward and the dev DB confirmed back to empty; both dev servers were then stopped.
+
 ## Current task
 
-None in progress. **Phase 2 — Milestone 1: Operations Workspace Foundation** is complete and verified, including its final whole-branch review and the one consolidated fix wave that review triggered (see "Operations Workspace Foundation — implementation notes" above for what shipped and the verification results). Hypothesis ↔ Evidence linking, previously listed here, is also complete and verified (see "Hypothesis ↔ Evidence milestone" above).
+None in progress. **Phase 2 — Milestone 2: Cases Workspace**, its follow-up UI design-system hardening pass, and the **Alert Triage Workspace** above are all complete and verified. Milestone 1: Operations Workspace Foundation and the Hypothesis ↔ Evidence milestone remain complete and verified as before (see their respective sections above).
 
 ## Next planned milestone
 
-Not yet chosen. The frontend foundation (BFF auth with proactive proxy-side refresh, protected routing, role-aware nav, UI primitives) is now in place, so the next Phase 2 milestone is whichever workspace feature is sequenced onto it — Alerts UI, Cases UI, or another per docs/ROADMAP.md's own ordering — none of which is scoped yet. Still-open alternatives from before Phase 2 remain available: Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
+Not yet chosen. With the app shell (Milestone 1), the Cases Workspace (Milestone 2), its UI hardening pass, and the Alert Triage Workspace now in place, both entry points into the documented Alert → Case → Investigation chain have a UI — the next natural depth-first step per CLAUDE.md's terminology chain is an Investigation Workspace (Hypothesis/Evidence UI) exposing the process that already happens *inside* an existing Case, per the Alert Triage Workspace's own discovery notes. That is not yet scoped, though. Still-open alternatives remain available: a Dashboard, Phase 1's remaining named items (search/filter, case export, richer metrics — docs/ROADMAP.md), or a second, smaller hardening pass over the still-deferred B-tier findings (see "Known technical debt" below). Playbooks, Knowledge, AI, and Integrations remain explicitly out of scope per CLAUDE.md until a future phase actually scopes them.
 
 ## Known technical debt / limitations / follow-ups
 
@@ -290,7 +401,7 @@ Not yet chosen. The frontend foundation (BFF auth with proactive proxy-side refr
 - No evidence update/delete — intentional (append-only), but means a genuine data-entry mistake in evidence can only be superseded by new evidence, never corrected in place.
 - `CasesService.reassign` doesn't call the shared `assertCanAccess` visibility check — harmless today since only Leads (who see every case) can reach it via `RolesGuard`, but it's an implicit invariant rather than an enforced one. From the readiness audit; deliberately not fixed in the hardening pass (scoped to the four required items only).
 - No `ParseUUIDPipe` (or equivalent) on path params anywhere in the app — a malformed case/user/alert id reaches Postgres raw and the generic exception filter turns the resulting driver error into a 500 instead of a 400. From the readiness audit; deferred.
-- Alert-linking has a TOCTOU: `assertAlertsLinkable` runs outside the write transaction, so a race between two concurrent link requests is only caught by the DB's unique constraint on `case_alerts.alert_id`, and the resulting `P2002` isn't mapped to a 409 — it surfaces as a 500. From the readiness audit; deferred.
+- ~~Alert-linking has a TOCTOU... the resulting `P2002` isn't mapped to a 409 — it surfaces as a 500~~ — **superseded**, see "Alert Triage Workspace" above: the race itself (the status check running outside the write transaction) is unchanged and still findable by reading the code, but its failure mode is now a 409, not a 500 — `CasesService.createCaseAlertLink()` catches the `P2002` explicitly.
 - Timeline's append-only guarantee is enforced only in application code (no update/delete endpoints exist); docs/SECURITY.md's DB-grant-level backstop (revoking `UPDATE`/`DELETE` on `timeline_events` from the app's own DB role) was never added via migration. From the readiness audit; deferred.
 - No CI pipeline and no enforced coverage threshold — all 198 tests pass locally as of this writing, but nothing gates a regression from merging. From the readiness audit; deferred.
 - The "verify real DB behavior via manual psql smoke-testing" step (see Test strategy above) has no committed script or checklist — it's repeatable in principle but not in practice. This hardening pass's own real-DB verification (see above) was ad hoc for the same reason; turning it into a committed script is still outstanding. From the readiness audit; deferred.
@@ -317,3 +428,6 @@ Not yet chosen. The frontend foundation (BFF auth with proactive proxy-side refr
 | `6c2b16b` | Milestone 1 hardening pass: CLAUDE.md/PROGRESS.md reconciliation, `/v1` API versioning, Notes/Comments (`POST /cases/:id/notes`\|`/comments`), refresh-token rotation race fix — see "Milestone 1 hardening pass" above |
 | _(pending)_ | Hypothesis ↔ Evidence linking: nullable `evidence.hypothesis_id`, `POST`/`GET /cases/:caseId/hypotheses/:hypothesisId/evidence` on the Investigations module — see "Hypothesis ↔ Evidence milestone" above |
 | `b616883`..`b24e85d` + this commit | Operations Workspace Foundation: Next.js BFF auth (httpOnly-cookie session, `proxy.ts`-based proactive refresh with single-flight de-dupe, network-failure tolerance, and a fail-closed `apiFetch`), login UI, protected workspace layout, role-aware nav, UI primitives — see "Operations Workspace Foundation — implementation notes" above |
+| `615aa97` | Cases Workspace (Milestone 2): case list with filters, case detail with lifecycle transitions/reassignment/notes/comments, case creation — see "Cases Workspace (Milestone 2) — implementation notes" above |
+| `ef56c66` | UI design-system hardening pass: `Badge`/`Card`/`Section` primitives, severity/status color semantics, lifecycle-action button emphasis, Geist-vs-Arial font fix, custom `not-found.tsx` — see "UI design-system hardening pass (post–Milestone 2)" above |
+| `6733018`..`47f1174` | Alert Triage Workspace: `P2002`→409 alert-linking race fix (`6733018`), Alert type/badge-tone extensions (`24e0410`), alerts + case-linking service layer (`72387c4`), Alerts nav entry (`998a2ca`), alert dismiss/link-to-case actions and forms (`dae9eae`), alert detail page (`f12444a`), alerts list page (`a1fb643`), create-case-from-one-or-more-alerts (`47f1174`) — see "Alert Triage Workspace" above |

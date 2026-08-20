@@ -5,14 +5,11 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import type {
-  Case,
-  Prisma,
-  TimelineEvent,
-} from '../../generated/prisma/client';
+import type { Case, TimelineEvent } from '../../generated/prisma/client';
 import {
   AlertStatus,
   CaseStatus,
+  Prisma,
   UserRole,
 } from '../../generated/prisma/client';
 import type { AuthenticatedUser } from '../auth/types/authenticated-user.type';
@@ -63,9 +60,7 @@ export class CasesService {
       });
 
       for (const alertId of alertIds) {
-        await tx.caseAlert.create({
-          data: { caseId: kase.id, alertId },
-        });
+        await this.createCaseAlertLink(tx, kase.id, alertId);
         await tx.alert.update({
           where: { id: alertId },
           data: { status: AlertStatus.linked },
@@ -191,9 +186,7 @@ export class CasesService {
     await this.assertAlertsLinkable([dto.alertId]);
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      await tx.caseAlert.create({
-        data: { caseId: id, alertId: dto.alertId },
-      });
+      await this.createCaseAlertLink(tx, id, dto.alertId);
       await tx.alert.update({
         where: { id: dto.alertId },
         data: { status: AlertStatus.linked },
@@ -310,6 +303,32 @@ export class CasesService {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user || user.disabledAt) {
       throw new NotFoundException('Assignee not found or disabled');
+    }
+  }
+
+  // assertAlertsLinkable (below) reads each alert's status outside this
+  // transaction, so two concurrent requests for the same still-"new" alert
+  // can both pass that read before either commits. CaseAlert.alertId's
+  // unique index is the real backstop for that race; this turns the
+  // resulting P2002 into the same 409 assertAlertsLinkable would have
+  // thrown had it re-checked a moment later, instead of an unmapped 500.
+  private async createCaseAlertLink(
+    tx: Prisma.TransactionClient,
+    caseId: string,
+    alertId: string,
+  ): Promise<void> {
+    try {
+      await tx.caseAlert.create({ data: { caseId, alertId } });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException(
+          `Alert ${alertId} was linked to another case concurrently`,
+        );
+      }
+      throw error;
     }
   }
 

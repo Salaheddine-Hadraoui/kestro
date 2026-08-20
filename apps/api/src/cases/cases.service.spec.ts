@@ -7,6 +7,7 @@ import {
 import {
   AlertStatus,
   CaseStatus,
+  Prisma,
   Severity,
   UserRole,
 } from '../../generated/prisma/client';
@@ -162,6 +163,19 @@ function createPrismaMock(seed: {
       }: {
         data: { caseId: string; alertId: string };
       }): FakeCaseAlertRow => {
+        const alreadyLinked = [...caseAlerts.values()].some(
+          (row) => row.alertId === data.alertId,
+        );
+        if (alreadyLinked) {
+          // Mirrors the real case_alerts.alert_id unique index (Postgres
+          // raises this as a unique-violation, which Prisma surfaces as
+          // P2002) so a race that reaches this point in the mock behaves
+          // like the real database instead of an unconstrained Map.
+          throw new Prisma.PrismaClientKnownRequestError(
+            'Unique constraint failed on the fields: (`alert_id`)',
+            { code: 'P2002', clientVersion: 'test' },
+          );
+        }
         const row: FakeCaseAlertRow = { id: `ca-${nextId++}`, ...data };
         caseAlerts.set(row.id, row);
         return row;
@@ -354,6 +368,25 @@ describe('CasesService', () => {
           alertIds: ['does-not-exist'],
         }),
       ).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('maps a concurrent link race (P2002) to 409 when linking at case creation', async () => {
+      const { service, caseAlerts } = createService({
+        alerts: [{ id: 'alert-1', status: AlertStatus.new }],
+      });
+      caseAlerts.set('existing', {
+        id: 'existing',
+        caseId: 'other-case',
+        alertId: 'alert-1',
+      });
+
+      await expect(
+        service.create(analyst, {
+          title: 'x',
+          severity: Severity.medium,
+          alertIds: ['alert-1'],
+        }),
+      ).rejects.toBeInstanceOf(ConflictException);
     });
   });
 
@@ -571,6 +604,29 @@ describe('CasesService', () => {
         alerts: [{ id: 'alert-1', status: AlertStatus.linked }],
       });
       mock.cases.set('c', makeCase({ id: 'c', status: CaseStatus.OPEN }));
+      const service = new CasesService(mock.prisma);
+
+      await expect(
+        service.linkAlert(analyst, 'c', { alertId: 'alert-1' }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
+
+    it('maps a concurrent link race (P2002) to 409 instead of leaking a raw Prisma error', async () => {
+      const mock = createPrismaMock({
+        users: activeUsers,
+        alerts: [{ id: 'alert-1', status: AlertStatus.new }],
+      });
+      mock.cases.set('c', makeCase({ id: 'c', status: CaseStatus.OPEN }));
+      // Simulates the exact race window this fix closes: another request's
+      // caseAlert.create already committed a row for this alertId (hence
+      // this pre-seeded row) between this request's own assertAlertsLinkable
+      // read -- which still sees "new", since that read already happened --
+      // and this request's own caseAlert.create.
+      mock.caseAlerts.set('existing', {
+        id: 'existing',
+        caseId: 'other-case',
+        alertId: 'alert-1',
+      });
       const service = new CasesService(mock.prisma);
 
       await expect(
