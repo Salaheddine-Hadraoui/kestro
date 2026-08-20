@@ -50,5 +50,5 @@ export async function linkAlertToCaseAction(
     }
     return { error: "Something went wrong. Please try again." };
   }
-  redirect(`/alerts/${alertId}`);
+  redirect(`/cases/${caseId}`);
 }

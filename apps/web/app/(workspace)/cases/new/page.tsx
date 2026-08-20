@@ -31,13 +31,16 @@ export default async function NewCasePage({
   // A stale, since-linked/dismissed, or otherwise unresolvable id is
   // silently dropped rather than surfaced as an error here -- the worst
   // case is the case gets created with fewer linked alerts than intended,
-  // never with a broken reference. If a selected alert's status has since
-  // changed, createCaseAction's own error handling (unchanged by this
-  // milestone) still applies when the case is actually submitted.
+  // never with a broken reference. This is why we also filter on
+  // status === "new" below: a since-linked/dismissed alert is excluded
+  // here, before it ever reaches createCaseAction, so a stale alert can
+  // never sink the whole submission.
   const alertResults = await Promise.all(
     requestedAlertIds.map((id) => getAlert(id).catch(() => null)),
   );
-  const alerts = alertResults.filter((alert): alert is NonNullable<typeof alert> => alert !== null);
+  const alerts = alertResults.filter(
+    (alert): alert is NonNullable<typeof alert> => alert !== null && alert.status === "new",
+  );
   const alertIds = alerts.map((alert) => alert.id);
 
   return (

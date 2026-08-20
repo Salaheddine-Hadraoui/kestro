@@ -64,6 +64,39 @@ describe("NewCasePage", () => {
     expect(screen.queryByText(/linked alert/i)).not.toBeInTheDocument();
   });
 
+  it("silently drops an alert that is no longer linkable (status changed since selection)", async () => {
+    const newAlertId = "3fa85f64-5717-4562-b3fc-2c963f66afa6";
+    const linkedAlertId = "3fa85f64-5717-4562-b3fc-2c963f66afa7";
+    (getAlert as jest.Mock).mockImplementation((id: string) =>
+      Promise.resolve({
+        id,
+        source: "manual",
+        summary: id === newAlertId ? "Suspicious login" : "Already linked alert",
+        severity: "high",
+        status: id === newAlertId ? "new" : "linked",
+        dismissReason: null,
+        dismissedById: null,
+        dismissedAt: null,
+        rawPayload: null,
+        createdAt: "2026-08-20T00:00:00.000Z",
+      }),
+    );
+
+    const { container } = render(
+      await NewCasePage({
+        searchParams: Promise.resolve({ alertIds: [newAlertId, linkedAlertId] }),
+      }),
+    );
+
+    expect(screen.getByText("Suspicious login")).toBeInTheDocument();
+    expect(screen.queryByText("Already linked alert")).not.toBeInTheDocument();
+    expect(screen.getByText(/1 linked alert\b/i)).toBeInTheDocument();
+
+    const hiddenInputs = container.querySelectorAll('input[type="hidden"][name="alertIds"]');
+    expect(hiddenInputs).toHaveLength(1);
+    expect(hiddenInputs[0]).toHaveValue(newAlertId);
+  });
+
   it("accepts multiple alertIds from a repeated query param", async () => {
     (getAlert as jest.Mock).mockImplementation((id: string) =>
       Promise.resolve({
