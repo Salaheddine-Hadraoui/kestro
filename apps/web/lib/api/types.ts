@@ -93,6 +93,34 @@ export interface PaginatedAlerts {
   offset: number;
 }
 
+export type HypothesisStatus = "proposed" | "validated" | "rejected";
+
+export interface Hypothesis {
+  id: string;
+  caseId: string;
+  authorId: string;
+  statement: string;
+  status: HypothesisStatus;
+  conclusionStatement: string | null;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export type EvidenceType = "LOG" | "SCREENSHOT" | "FILE" | "URL" | "COMMAND_OUTPUT" | "OTHER";
+
+export interface Evidence {
+  id: string;
+  caseId: string;
+  timelineEventId: string;
+  hypothesisId: string | null;
+  type: EvidenceType;
+  source: string;
+  content: string;
+  timestamp: string;
+  authorId: string;
+  createdAt: string;
+}
+
 export type TimelineEventType =
   | "note"
   | "status_change"

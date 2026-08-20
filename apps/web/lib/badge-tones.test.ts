@@ -1,9 +1,10 @@
 import {
   ALERT_STATUS_BADGE_TONE,
   CASE_STATUS_BADGE_TONE,
+  HYPOTHESIS_STATUS_BADGE_TONE,
   SEVERITY_BADGE_TONE,
 } from "./badge-tones";
-import type { AlertStatus, CaseStatus, Severity } from "./api/types";
+import type { AlertStatus, CaseStatus, HypothesisStatus, Severity } from "./api/types";
 
 // Regression guard: a new Severity/CaseStatus value added to lib/api/types.ts
 // without a matching tone entry would render `undefined` classes (an
@@ -41,6 +42,13 @@ describe("badge-tones", () => {
     const statuses: AlertStatus[] = ["new", "linked", "dismissed"];
     for (const status of statuses) {
       expect(ALERT_STATUS_BADGE_TONE[status]).toBeDefined();
+    }
+  });
+
+  it("maps every HypothesisStatus value to a tone", () => {
+    const statuses: HypothesisStatus[] = ["proposed", "validated", "rejected"];
+    for (const status of statuses) {
+      expect(HYPOTHESIS_STATUS_BADGE_TONE[status]).toBeDefined();
     }
   });
 });
