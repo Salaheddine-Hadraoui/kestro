@@ -14,7 +14,7 @@ export function LinkEvidenceForm({
 }: {
   caseId: string;
   hypothesisId: string;
-  evidenceOptions: { id: string; source: string }[];
+  evidenceOptions: { id: string; source: string; type: string; timestamp: string }[];
 }) {
   const [state, formAction, pending] = useActionState(linkEvidenceAction, initialState);
 
@@ -35,7 +35,7 @@ export function LinkEvidenceForm({
           <option value="">Choose evidence</option>
           {evidenceOptions.map((evidence) => (
             <option key={evidence.id} value={evidence.id}>
-              {evidence.source}
+              {evidence.source} · {evidence.type} · {new Date(evidence.timestamp).toLocaleString()}
             </option>
           ))}
         </select>

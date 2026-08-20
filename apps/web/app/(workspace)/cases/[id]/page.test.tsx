@@ -206,6 +206,7 @@ describe("CaseDetailPage", () => {
 
     expect(screen.getByText("Phishing led to credential theft")).toBeInTheDocument();
     expect(screen.getByText("proposed")).toBeInTheDocument();
+    expect(screen.getByText(/proposed by ada lovelace/i)).toBeInTheDocument();
   });
 
   it("renders a message when no hypotheses have been proposed", async () => {
@@ -293,6 +294,7 @@ describe("CaseDetailPage", () => {
 
     expect(screen.getByText(/auth-server/)).toBeInTheDocument();
     expect(screen.getByText("Failed login at 03:00 UTC")).toBeInTheDocument();
+    expect(screen.getByText(/recorded by ada lovelace/i)).toBeInTheDocument();
   });
 
   it("renders a message when no evidence has been recorded", async () => {
@@ -341,6 +343,8 @@ describe("CaseDetailPage", () => {
     expect(
       screen.getByText(/linked to hypothesis:\s*phishing led to credential theft/i),
     ).toBeInTheDocument();
+    // The other direction: the hypothesis card itself should show the linked evidence's source.
+    expect(screen.getByText(/linked evidence:.*auth-server/i)).toBeInTheDocument();
   });
 
   it("hides the add-evidence form when the case is resolved", async () => {

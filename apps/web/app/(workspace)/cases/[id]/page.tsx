@@ -145,6 +145,9 @@ export default async function CaseDetailPage({
                     <p className="text-sm">{hypothesis.statement}</p>
                     <Badge tone={HYPOTHESIS_STATUS_BADGE_TONE[hypothesis.status]}>{hypothesis.status}</Badge>
                   </div>
+                  <p className="text-xs text-black/60 dark:text-white/60">
+                    Proposed by {resolveUserName(userNames, hypothesis.authorId)}
+                  </p>
                   {hypothesis.status !== "proposed" && hypothesis.conclusionStatement && (
                     <p className="text-sm text-black/60 dark:text-white/60">
                       <span className="font-medium">Conclusion: </span>
@@ -163,7 +166,12 @@ export default async function CaseDetailPage({
                       <LinkEvidenceForm
                         caseId={kase.id}
                         hypothesisId={hypothesis.id}
-                        evidenceOptions={unlinkedEvidence.map((item) => ({ id: item.id, source: item.source }))}
+                        evidenceOptions={unlinkedEvidence.map((item) => ({
+                          id: item.id,
+                          source: item.source,
+                          type: item.type,
+                          timestamp: item.timestamp,
+                        }))}
                       />
                     </div>
                   )}
@@ -188,6 +196,9 @@ export default async function CaseDetailPage({
                   </span>
                   <span>{new Date(item.timestamp).toLocaleString()}</span>
                 </div>
+                <p className="mt-1 text-xs text-black/50 dark:text-white/50">
+                  Recorded by {resolveUserName(userNames, item.authorId)}
+                </p>
                 <p className="mt-1 text-sm">{item.content}</p>
                 {item.hypothesisId && (
                   <p className="mt-1 text-xs text-black/50 dark:text-white/50">
