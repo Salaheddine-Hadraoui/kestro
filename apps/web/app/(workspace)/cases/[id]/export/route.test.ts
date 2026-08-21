@@ -17,7 +17,7 @@ import { getCase, listCaseTimelineEntries } from "../../../../../features/cases/
 import { listHypotheses } from "../../../../../features/investigations/service";
 import { listEvidence } from "../../../../../features/evidence/service";
 import { listUsers } from "../../../../../features/users/service";
-import { ApiError } from "../../../../../lib/server/api-client";
+import { ApiError, SessionExpiredError } from "../../../../../lib/server/api-client";
 import { GET } from "./route";
 
 describe("GET /cases/:id/export", () => {
@@ -77,5 +77,62 @@ describe("GET /cases/:id/export", () => {
     });
 
     expect(response.status).toBe(404);
+  });
+
+  it("redirects to /session-expired when getCase throws SessionExpiredError", async () => {
+    (getCase as jest.Mock).mockRejectedValue(new SessionExpiredError());
+
+    const response = await GET(new Request("http://localhost:3000/cases/c1/export"), {
+      params: Promise.resolve({ id: "c1" }),
+    });
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe("http://localhost:3000/session-expired");
+  });
+
+  it("discloses truncation in the exported document when the timeline total exceeds 100", async () => {
+    (getCase as jest.Mock).mockResolvedValue({
+      id: "c1",
+      title: "Suspicious VPN login",
+      status: "OPEN",
+      severity: "high",
+      assigneeId: "u1",
+      resolutionSummary: null,
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T00:00:00.000Z",
+      alerts: [],
+    });
+    (listCaseTimelineEntries as jest.Mock).mockResolvedValue({ data: [], total: 145, limit: 100, offset: 0 });
+
+    const response = await GET(new Request("http://localhost:3000/cases/c1/export"), {
+      params: Promise.resolve({ id: "c1" }),
+    });
+
+    const body = await response.text();
+    expect(body).toContain(
+      "Only the latest 100 timeline entries were available; earlier notes and comments are not included.",
+    );
+  });
+
+  it("does not disclose truncation when the timeline total is within 100", async () => {
+    (getCase as jest.Mock).mockResolvedValue({
+      id: "c1",
+      title: "Suspicious VPN login",
+      status: "OPEN",
+      severity: "high",
+      assigneeId: "u1",
+      resolutionSummary: null,
+      createdAt: "2026-08-21T00:00:00.000Z",
+      updatedAt: "2026-08-21T00:00:00.000Z",
+      alerts: [],
+    });
+    (listCaseTimelineEntries as jest.Mock).mockResolvedValue({ data: [], total: 12, limit: 100, offset: 0 });
+
+    const response = await GET(new Request("http://localhost:3000/cases/c1/export"), {
+      params: Promise.resolve({ id: "c1" }),
+    });
+
+    const body = await response.text();
+    expect(body).not.toContain("Only the latest 100 timeline entries were available");
   });
 });

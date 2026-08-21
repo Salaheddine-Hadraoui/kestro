@@ -9,6 +9,7 @@ export interface CaseExportInput {
   evidence: Evidence[];
   notesAndComments: HumanEntry[];
   exportedAt: string;
+  timelineTotal: number;
 }
 
 // Renders the same human-readable facts the case detail page shows --
@@ -16,7 +17,7 @@ export interface CaseExportInput {
 // alert_linked/evidence_added) -- per this milestone's explicit
 // requirement not to expose internal implementation events.
 export function renderCaseExport(input: CaseExportInput): string {
-  const { kase, userNames, hypotheses, evidence, notesAndComments, exportedAt } = input;
+  const { kase, userNames, hypotheses, evidence, notesAndComments, exportedAt, timelineTotal } = input;
 
   const evidenceByHypothesis = new Map<string, Evidence[]>();
   for (const item of evidence) {
@@ -82,6 +83,10 @@ export function renderCaseExport(input: CaseExportInput): string {
 
   lines.push("## Notes & Comments");
   lines.push("");
+  if (timelineTotal > 100) {
+    lines.push("> Only the latest 100 timeline entries were available; earlier notes and comments are not included.");
+    lines.push("");
+  }
   if (notesAndComments.length === 0) {
     lines.push("No notes or comments.");
   } else {

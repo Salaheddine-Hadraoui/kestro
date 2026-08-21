@@ -30,6 +30,7 @@ describe("renderCaseExport", () => {
       evidence: [],
       notesAndComments: [],
       exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 0,
     });
 
     expect(markdown).toContain("Suspicious VPN login");
@@ -70,6 +71,7 @@ describe("renderCaseExport", () => {
       evidence: [evidence],
       notesAndComments: [],
       exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 0,
     });
 
     expect(markdown).toContain("Attacker used a phished credential");
@@ -95,6 +97,7 @@ describe("renderCaseExport", () => {
       evidence: [],
       notesAndComments: [entry],
       exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 0,
     });
 
     expect(markdown).toContain("Confirmed the source IP is outside the VPN's normal range.");
@@ -109,6 +112,7 @@ describe("renderCaseExport", () => {
       evidence: [],
       notesAndComments: [],
       exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 0,
     });
 
     expect(markdown).toContain("No hypotheses proposed.");
@@ -124,10 +128,41 @@ describe("renderCaseExport", () => {
       evidence: [],
       notesAndComments: [],
       exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 0,
     });
 
     expect(markdown).not.toContain("status_change");
     expect(markdown).not.toContain("alert_linked");
     expect(markdown).not.toContain("evidence_added");
+  });
+
+  it("discloses truncation when the timeline total exceeds the 100-event window", () => {
+    const markdown = renderCaseExport({
+      kase: makeCase(),
+      userNames,
+      hypotheses: [],
+      evidence: [],
+      notesAndComments: [],
+      exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 101,
+    });
+
+    expect(markdown).toContain(
+      "Only the latest 100 timeline entries were available; earlier notes and comments are not included.",
+    );
+  });
+
+  it("does not disclose truncation when the timeline total is within the 100-event window", () => {
+    const markdown = renderCaseExport({
+      kase: makeCase(),
+      userNames,
+      hypotheses: [],
+      evidence: [],
+      notesAndComments: [],
+      exportedAt: "2026-08-21T12:00:00.000Z",
+      timelineTotal: 100,
+    });
+
+    expect(markdown).not.toContain("Only the latest 100 timeline entries were available");
   });
 });

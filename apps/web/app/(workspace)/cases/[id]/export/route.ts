@@ -6,14 +6,14 @@ import { listUsers } from "@/features/users/service";
 import { buildUserNameMap } from "@/lib/format-user";
 import { extractHumanEntries } from "@/lib/case-notes";
 import { renderCaseExport } from "@/lib/case-export";
-import { ApiError } from "@/lib/server/api-client";
+import { ApiError, SessionExpiredError } from "@/lib/server/api-client";
 
 // A Route Handler, not a page: like app/session-expired/route.ts, this
 // needs to return a response shape (a file download) a Server Component
 // page cannot produce. Reuses the exact services the case detail page
 // already calls -- no new backend endpoint, no new authorization logic.
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
@@ -22,6 +22,9 @@ export async function GET(
   try {
     kase = await getCase(id);
   } catch (error) {
+    if (error instanceof SessionExpiredError) {
+      return NextResponse.redirect(new URL("/session-expired", request.url));
+    }
     if (error instanceof ApiError) {
       return NextResponse.json({ message: error.message }, { status: error.status });
     }
@@ -42,6 +45,7 @@ export async function GET(
     evidence,
     notesAndComments: extractHumanEntries(timeline.data),
     exportedAt: new Date().toISOString(),
+    timelineTotal: timeline.total,
   });
 
   const isoDate = new Date().toISOString().slice(0, 10);
