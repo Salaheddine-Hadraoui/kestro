@@ -85,6 +85,7 @@ export class CasesService {
     actor: AuthenticatedUser,
     query: ListCasesQueryDto,
   ): Promise<PaginatedCases> {
+    const q = query.q?.trim();
     const where: Prisma.CaseWhereInput = {
       ...(actor.role !== UserRole.lead
         ? { assigneeId: actor.userId }
@@ -93,6 +94,7 @@ export class CasesService {
           : {}),
       ...(query.status !== undefined && { status: query.status }),
       ...(query.severity !== undefined && { severity: query.severity }),
+      ...(q && { title: { contains: q, mode: 'insensitive' } }),
     };
 
     const [data, total] = await Promise.all([

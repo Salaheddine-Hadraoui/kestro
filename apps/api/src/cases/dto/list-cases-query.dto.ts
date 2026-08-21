@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { CaseStatus, Severity } from '../../../generated/prisma/client';
 
 export class ListCasesQueryDto {
@@ -17,6 +17,16 @@ export class ListCasesQueryDto {
   @IsOptional()
   @IsUUID('4')
   assigneeId?: string;
+
+  // Free-text search against Case.title only -- Case has no other
+  // free-text column. Trimming/blank-to-"no filter" normalization happens
+  // in CasesService.findAll, not here, matching this codebase's existing
+  // convention of trimming free-text input in application code rather
+  // than via a new @Transform decorator (no DTO in this codebase uses one).
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  q?: string;
 
   @IsOptional()
   @Type(() => Number)

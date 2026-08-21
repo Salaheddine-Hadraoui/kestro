@@ -80,7 +80,16 @@ function createFakePrisma(
   const matches = (
     row: Record<string, unknown>,
     where: Record<string, unknown>,
-  ) => Object.entries(where).every(([k, v]) => v === undefined || row[k] === v);
+  ) =>
+    Object.entries(where).every(([k, v]) => {
+      if (v === undefined) return true;
+      if (typeof v === 'object' && v !== null && 'contains' in (v as Record<string, unknown>)) {
+        const needle = String((v as { contains: string }).contains).toLowerCase();
+        const haystack = String(row[k] ?? '').toLowerCase();
+        return haystack.includes(needle);
+      }
+      return row[k] === v;
+    });
 
   const client = {
     onModuleInit: () => undefined,
@@ -440,6 +449,26 @@ describe('Cases (e2e)', () => {
 
       const body = response.body as { total: number };
       expect(body.total).toBe(1);
+    });
+
+    it('finds a case by a case-insensitive substring of its title via ?q=', async () => {
+      await createCase(analystToken, { title: 'Suspicious VPN login' });
+
+      const response = await request(app.getHttpServer())
+        .get('/v1/cases?q=vpn')
+        .set('Authorization', `Bearer ${analystToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toHaveLength(1);
+      expect(response.body.data[0].title).toBe('Suspicious VPN login');
+    });
+
+    it('rejects a search query longer than 200 characters with a 400', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/v1/cases?q=${'a'.repeat(201)}`)
+        .set('Authorization', `Bearer ${analystToken}`);
+
+      expect(response.status).toBe(400);
     });
   });
 
