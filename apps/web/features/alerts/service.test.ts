@@ -44,4 +44,10 @@ describe("alerts service", () => {
     await getAlert("has space/slash");
     expect(apiFetch).toHaveBeenCalledWith("/alerts/has%20space%2Fslash");
   });
+
+  it("includes q in the query string when provided", async () => {
+    (apiFetch as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+    await listAlerts({ q: "phishing", limit: 25, offset: 0 });
+    expect(apiFetch).toHaveBeenCalledWith("/alerts?q=phishing&limit=25&offset=0");
+  });
 });

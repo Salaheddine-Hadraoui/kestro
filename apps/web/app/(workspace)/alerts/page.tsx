@@ -17,12 +17,13 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 }
 
 function buildPageHref(
-  filters: { status?: AlertStatus; severity?: Severity },
+  filters: { status?: AlertStatus; severity?: Severity; q?: string },
   offset: number,
 ): string {
   const params = new URLSearchParams();
   if (filters.status !== undefined) params.set("status", filters.status);
   if (filters.severity !== undefined) params.set("severity", filters.severity);
+  if (filters.q !== undefined) params.set("q", filters.q);
   params.set("offset", String(offset));
   return `/alerts?${params.toString()}`;
 }
@@ -38,12 +39,17 @@ export default async function AlertsPage({
   const severity = firstValue(params.severity);
   const offset = firstValue(params.offset);
 
+  const rawQ = firstValue(params.q);
+  const trimmedQ = rawQ?.trim();
+  const safeQ = trimmedQ && trimmedQ.length > 0 && trimmedQ.length <= 200 ? trimmedQ : undefined;
+
   const parsedOffset = offset !== undefined ? Number(offset) : 0;
   const safeOffset = Number.isInteger(parsedOffset) && parsedOffset >= 0 ? parsedOffset : 0;
 
   const filters = {
     status: STATUSES.includes(status as AlertStatus) ? (status as AlertStatus) : undefined,
     severity: SEVERITIES.includes(severity as Severity) ? (severity as Severity) : undefined,
+    q: safeQ,
     limit: 25,
     offset: safeOffset,
   };
@@ -55,6 +61,17 @@ export default async function AlertsPage({
       <h1 className="text-xl font-semibold">Alerts</h1>
 
       <form method="GET" className="flex flex-wrap items-end gap-4">
+        <label className="space-y-1 text-sm">
+          <span className="block font-medium">Search</span>
+          <input
+            type="search"
+            name="q"
+            defaultValue={rawQ ?? ""}
+            maxLength={200}
+            placeholder="Source or summary..."
+            className="rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
+          />
+        </label>
         <label className="space-y-1 text-sm">
           <span className="block font-medium">Status</span>
           <select name="status" defaultValue={status ?? ""} className="rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent">

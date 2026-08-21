@@ -88,4 +88,37 @@ describe("AlertsPage", () => {
     await AlertsPage({ searchParams: Promise.resolve({ offset: "not-a-number" }) });
     expect(listAlerts).toHaveBeenCalledWith(expect.objectContaining({ offset: 0 }));
   });
+
+  it("renders a search input", async () => {
+    (listAlerts as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    const jsx = await AlertsPage({ searchParams: Promise.resolve({}) });
+    render(jsx);
+
+    expect(screen.getByLabelText(/search/i)).toBeInTheDocument();
+  });
+
+  it("passes a trimmed q through to listAlerts", async () => {
+    (listAlerts as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    await AlertsPage({ searchParams: Promise.resolve({ q: "  phishing  " }) });
+
+    expect(listAlerts).toHaveBeenCalledWith(expect.objectContaining({ q: "phishing" }));
+  });
+
+  it("drops a whitespace-only q instead of sending it", async () => {
+    (listAlerts as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    await AlertsPage({ searchParams: Promise.resolve({ q: "   " }) });
+
+    expect(listAlerts).toHaveBeenCalledWith(expect.objectContaining({ q: undefined }));
+  });
+
+  it("drops a q longer than 200 characters instead of sending it", async () => {
+    (listAlerts as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    await AlertsPage({ searchParams: Promise.resolve({ q: "a".repeat(201) }) });
+
+    expect(listAlerts).toHaveBeenCalledWith(expect.objectContaining({ q: undefined }));
+  });
 });

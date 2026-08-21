@@ -5,6 +5,7 @@ import type { Alert, AlertStatus, PaginatedAlerts, Severity } from "../../lib/ap
 export interface ListAlertsFilters {
   status?: AlertStatus;
   severity?: Severity;
+  q?: string;
   limit?: number;
   offset?: number;
 }
@@ -13,6 +14,7 @@ export async function listAlerts(filters: ListAlertsFilters): Promise<PaginatedA
   const params = new URLSearchParams();
   if (filters.status !== undefined) params.set("status", filters.status);
   if (filters.severity !== undefined) params.set("severity", filters.severity);
+  if (filters.q !== undefined) params.set("q", filters.q);
   if (filters.limit !== undefined) params.set("limit", String(filters.limit));
   if (filters.offset !== undefined) params.set("offset", String(filters.offset));
   return apiFetch<PaginatedAlerts>(`/alerts?${params.toString()}`);
