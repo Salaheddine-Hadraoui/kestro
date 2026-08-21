@@ -47,7 +47,10 @@ function createFakePrisma(seedUsers: FakeUserRow[]) {
   const alerts = new Map<string, FakeAlertRow>();
   let nextAlertId = 1;
 
-  const matchesAlert = (alert: FakeAlertRow, where: Record<string, unknown>): boolean =>
+  const matchesAlert = (
+    alert: FakeAlertRow,
+    where: Record<string, unknown>,
+  ): boolean =>
     Object.entries(where).every(([key, value]) => {
       if (value === undefined) return true;
       if (key === 'OR') {
@@ -59,10 +62,12 @@ function createFakePrisma(seedUsers: FakeUserRow[]) {
         value !== null &&
         'contains' in (value as Record<string, unknown>)
       ) {
-        const needle = String((value as { contains: string }).contains).toLowerCase();
-        const haystack = String(
-          (alert as unknown as Record<string, unknown>)[key] ?? '',
+        const needle = String(
+          (value as { contains: string }).contains,
         ).toLowerCase();
+        const raw = (alert as unknown as Record<string, unknown>)[key] as
+          string | number | boolean | null | undefined;
+        const haystack = String(raw ?? '').toLowerCase();
         return haystack.includes(needle);
       }
       return (alert as unknown as Record<string, unknown>)[key] === value;
@@ -346,7 +351,7 @@ describe('Alerts (e2e)', () => {
         .set('Authorization', `Bearer ${analystToken}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.data).toHaveLength(1);
+      expect((response.body as Record<string, unknown>).data).toHaveLength(1);
     });
 
     it('rejects a search query longer than 200 characters with a 400', async () => {

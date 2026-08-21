@@ -80,9 +80,9 @@ function createPrismaMock(seed: {
         const needle = String(
           (value as { contains: string }).contains,
         ).toLowerCase();
-        const haystack = String(
-          (kase as unknown as Record<string, unknown>)[key] ?? '',
-        ).toLowerCase();
+        const raw = (kase as unknown as Record<string, unknown>)[key] as
+          string | number | boolean | null | undefined;
+        const haystack = String(raw ?? '').toLowerCase();
         return haystack.includes(needle);
       }
       return (kase as unknown as Record<string, unknown>)[key] === value;
@@ -440,11 +440,29 @@ describe('CasesService', () => {
 
     it('matches cases whose title contains the query, case-insensitively', async () => {
       const mock = createPrismaMock({ users: activeUsers });
-      mock.cases.set('a', makeCase({ id: 'a', assigneeId: 'analyst-1', title: 'Suspicious VPN login' }));
-      mock.cases.set('b', makeCase({ id: 'b', assigneeId: 'analyst-1', title: 'Phishing report' }));
+      mock.cases.set(
+        'a',
+        makeCase({
+          id: 'a',
+          assigneeId: 'analyst-1',
+          title: 'Suspicious VPN login',
+        }),
+      );
+      mock.cases.set(
+        'b',
+        makeCase({
+          id: 'b',
+          assigneeId: 'analyst-1',
+          title: 'Phishing report',
+        }),
+      );
       const service = new CasesService(mock.prisma);
 
-      const result = await service.findAll(analyst, { q: 'vpn', limit: 25, offset: 0 });
+      const result = await service.findAll(analyst, {
+        q: 'vpn',
+        limit: 25,
+        offset: 0,
+      });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('a');
@@ -452,8 +470,24 @@ describe('CasesService', () => {
 
     it('combines a search query with an existing status filter (AND, not OR)', async () => {
       const mock = createPrismaMock({ users: activeUsers });
-      mock.cases.set('a', makeCase({ id: 'a', assigneeId: 'analyst-1', title: 'Suspicious VPN login', status: CaseStatus.OPEN }));
-      mock.cases.set('b', makeCase({ id: 'b', assigneeId: 'analyst-1', title: 'Suspicious VPN login', status: CaseStatus.RESOLVED }));
+      mock.cases.set(
+        'a',
+        makeCase({
+          id: 'a',
+          assigneeId: 'analyst-1',
+          title: 'Suspicious VPN login',
+          status: CaseStatus.OPEN,
+        }),
+      );
+      mock.cases.set(
+        'b',
+        makeCase({
+          id: 'b',
+          assigneeId: 'analyst-1',
+          title: 'Suspicious VPN login',
+          status: CaseStatus.RESOLVED,
+        }),
+      );
       const service = new CasesService(mock.prisma);
 
       const result = await service.findAll(analyst, {
@@ -469,11 +503,29 @@ describe('CasesService', () => {
 
     it('still scopes an Analyst to their own cases when a search query is present', async () => {
       const mock = createPrismaMock({ users: activeUsers });
-      mock.cases.set('a', makeCase({ id: 'a', assigneeId: 'analyst-1', title: 'Suspicious VPN login' }));
-      mock.cases.set('b', makeCase({ id: 'b', assigneeId: 'analyst-2', title: 'Suspicious VPN login' }));
+      mock.cases.set(
+        'a',
+        makeCase({
+          id: 'a',
+          assigneeId: 'analyst-1',
+          title: 'Suspicious VPN login',
+        }),
+      );
+      mock.cases.set(
+        'b',
+        makeCase({
+          id: 'b',
+          assigneeId: 'analyst-2',
+          title: 'Suspicious VPN login',
+        }),
+      );
       const service = new CasesService(mock.prisma);
 
-      const result = await service.findAll(analyst, { q: 'vpn', limit: 25, offset: 0 });
+      const result = await service.findAll(analyst, {
+        q: 'vpn',
+        limit: 25,
+        offset: 0,
+      });
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('a');
@@ -481,10 +533,21 @@ describe('CasesService', () => {
 
     it('treats a whitespace-only search query as no filter', async () => {
       const mock = createPrismaMock({ users: activeUsers });
-      mock.cases.set('a', makeCase({ id: 'a', assigneeId: 'analyst-1', title: 'Suspicious VPN login' }));
+      mock.cases.set(
+        'a',
+        makeCase({
+          id: 'a',
+          assigneeId: 'analyst-1',
+          title: 'Suspicious VPN login',
+        }),
+      );
       const service = new CasesService(mock.prisma);
 
-      const result = await service.findAll(analyst, { q: '   ', limit: 25, offset: 0 });
+      const result = await service.findAll(analyst, {
+        q: '   ',
+        limit: 25,
+        offset: 0,
+      });
 
       expect(result.data).toHaveLength(1);
     });

@@ -83,9 +83,16 @@ function createFakePrisma(
   ) =>
     Object.entries(where).every(([k, v]) => {
       if (v === undefined) return true;
-      if (typeof v === 'object' && v !== null && 'contains' in (v as Record<string, unknown>)) {
-        const needle = String((v as { contains: string }).contains).toLowerCase();
-        const haystack = String(row[k] ?? '').toLowerCase();
+      if (
+        typeof v === 'object' &&
+        v !== null &&
+        'contains' in (v as Record<string, unknown>)
+      ) {
+        const needle = String(
+          (v as { contains: string }).contains,
+        ).toLowerCase();
+        const raw = row[k] as string | number | boolean | null | undefined;
+        const haystack = String(raw ?? '').toLowerCase();
         return haystack.includes(needle);
       }
       return row[k] === v;
@@ -459,8 +466,14 @@ describe('Cases (e2e)', () => {
         .set('Authorization', `Bearer ${analystToken}`);
 
       expect(response.status).toBe(200);
-      expect(response.body.data).toHaveLength(1);
-      expect(response.body.data[0].title).toBe('Suspicious VPN login');
+      expect((response.body as Record<string, unknown>).data).toHaveLength(1);
+      expect(
+        (
+          (response.body as Record<string, unknown>).data as Array<{
+            title: string;
+          }>
+        )[0].title,
+      ).toBe('Suspicious VPN login');
     });
 
     it('rejects a search query longer than 200 characters with a 400', async () => {

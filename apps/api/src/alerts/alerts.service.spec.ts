@@ -24,7 +24,10 @@ function createPrismaMock(seedAlerts: FakeAlertRow[] = []) {
   );
   let nextId = 1;
 
-  const matches = (alert: FakeAlertRow, where: Record<string, unknown>): boolean =>
+  const matches = (
+    alert: FakeAlertRow,
+    where: Record<string, unknown>,
+  ): boolean =>
     Object.entries(where).every(([key, value]) => {
       if (value === undefined) return true;
       if (key === 'OR') {
@@ -36,10 +39,12 @@ function createPrismaMock(seedAlerts: FakeAlertRow[] = []) {
         value !== null &&
         'contains' in (value as Record<string, unknown>)
       ) {
-        const needle = String((value as { contains: string }).contains).toLowerCase();
-        const haystack = String(
-          (alert as unknown as Record<string, unknown>)[key] ?? '',
+        const needle = String(
+          (value as { contains: string }).contains,
         ).toLowerCase();
+        const raw = (alert as unknown as Record<string, unknown>)[key] as
+          string | number | boolean | null | undefined;
+        const haystack = String(raw ?? '').toLowerCase();
         return haystack.includes(needle);
       }
       return (alert as unknown as Record<string, unknown>)[key] === value;
