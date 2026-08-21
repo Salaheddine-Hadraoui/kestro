@@ -47,9 +47,26 @@ function createFakePrisma(seedUsers: FakeUserRow[]) {
   const alerts = new Map<string, FakeAlertRow>();
   let nextAlertId = 1;
 
-  const matchesAlert = (alert: FakeAlertRow, where: Partial<FakeAlertRow>) =>
-    (where.status === undefined || alert.status === where.status) &&
-    (where.severity === undefined || alert.severity === where.severity);
+  const matchesAlert = (alert: FakeAlertRow, where: Record<string, unknown>): boolean =>
+    Object.entries(where).every(([key, value]) => {
+      if (value === undefined) return true;
+      if (key === 'OR') {
+        const clauses = value as Record<string, unknown>[];
+        return clauses.some((clause) => matchesAlert(alert, clause));
+      }
+      if (
+        typeof value === 'object' &&
+        value !== null &&
+        'contains' in (value as Record<string, unknown>)
+      ) {
+        const needle = String((value as { contains: string }).contains).toLowerCase();
+        const haystack = String(
+          (alert as unknown as Record<string, unknown>)[key] ?? '',
+        ).toLowerCase();
+        return haystack.includes(needle);
+      }
+      return (alert as unknown as Record<string, unknown>)[key] === value;
+    });
 
   return {
     onModuleInit: () => undefined,
@@ -312,6 +329,32 @@ describe('Alerts (e2e)', () => {
       const body = list.body as { data: { id: string }[]; total: number };
       expect(body.total).toBe(1);
       expect(body.data[0].id).toBe(secondId);
+    });
+
+    it('finds an alert by a case-insensitive substring of its source or summary via ?q=', async () => {
+      await request(app.getHttpServer())
+        .post('/v1/alerts')
+        .set('Authorization', `Bearer ${analystToken}`)
+        .send({
+          source: 'edr-agent',
+          summary: 'Phishing email detected',
+          severity: Severity.high,
+        });
+
+      const response = await request(app.getHttpServer())
+        .get('/v1/alerts?q=phishing')
+        .set('Authorization', `Bearer ${analystToken}`);
+
+      expect(response.status).toBe(200);
+      expect(response.body.data).toHaveLength(1);
+    });
+
+    it('rejects a search query longer than 200 characters with a 400', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/v1/alerts?q=${'a'.repeat(201)}`)
+        .set('Authorization', `Bearer ${analystToken}`);
+
+      expect(response.status).toBe(400);
     });
   });
 

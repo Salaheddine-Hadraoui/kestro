@@ -24,9 +24,26 @@ function createPrismaMock(seedAlerts: FakeAlertRow[] = []) {
   );
   let nextId = 1;
 
-  const matches = (alert: FakeAlertRow, where: Partial<FakeAlertRow>) =>
-    (where.status === undefined || alert.status === where.status) &&
-    (where.severity === undefined || alert.severity === where.severity);
+  const matches = (alert: FakeAlertRow, where: Record<string, unknown>): boolean =>
+    Object.entries(where).every(([key, value]) => {
+      if (value === undefined) return true;
+      if (key === 'OR') {
+        const clauses = value as Record<string, unknown>[];
+        return clauses.some((clause) => matches(alert, clause));
+      }
+      if (
+        typeof value === 'object' &&
+        value !== null &&
+        'contains' in (value as Record<string, unknown>)
+      ) {
+        const needle = String((value as { contains: string }).contains).toLowerCase();
+        const haystack = String(
+          (alert as unknown as Record<string, unknown>)[key] ?? '',
+        ).toLowerCase();
+        return haystack.includes(needle);
+      }
+      return (alert as unknown as Record<string, unknown>)[key] === value;
+    });
 
   const prisma = {
     alert: {
@@ -199,6 +216,98 @@ describe('AlertsService', () => {
 
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('b');
+    });
+
+    it('matches alerts whose source or summary contains the query, case-insensitively', async () => {
+      const seed = [
+        makeAlert({
+          id: 'a',
+          source: 'edr-agent',
+          summary: 'Suspicious process spawn',
+        }),
+        makeAlert({
+          id: 'b',
+          source: 'manual',
+          summary: 'Phishing report from finance',
+        }),
+      ];
+      const { service } = createService(seed);
+
+      const result = await service.findAll({
+        q: 'phishing',
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].id).toBe('b');
+    });
+
+    it('matches on source even when summary does not contain the query', async () => {
+      const seed = [
+        makeAlert({
+          id: 'a',
+          source: 'edr-agent',
+          summary: 'Suspicious process spawn',
+        }),
+      ];
+      const { service } = createService(seed);
+
+      const result = await service.findAll({
+        q: 'edr',
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(result.data).toHaveLength(1);
+    });
+
+    it('combines a search query with an existing severity filter (AND, not OR)', async () => {
+      const seed = [
+        makeAlert({
+          id: 'a',
+          source: 'edr-agent',
+          summary: 'Phishing detected',
+          severity: Severity.high,
+        }),
+        makeAlert({
+          id: 'b',
+          source: 'edr-agent',
+          summary: 'Phishing detected',
+          severity: Severity.low,
+        }),
+      ];
+      const { service } = createService(seed);
+
+      const result = await service.findAll({
+        q: 'phishing',
+        severity: Severity.high,
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(result.data).toHaveLength(1);
+      expect(result.data[0].id).toBe('a');
+    });
+
+    it('treats a whitespace-only search query as no filter', async () => {
+      const seed = [
+        makeAlert({
+          id: 'a',
+          source: 'edr-agent',
+          summary: 'Phishing detected',
+          severity: Severity.high,
+        }),
+      ];
+      const { service } = createService(seed);
+
+      const result = await service.findAll({
+        q: '   ',
+        limit: 25,
+        offset: 0,
+      });
+
+      expect(result.data).toHaveLength(1);
     });
   });
 

@@ -28,9 +28,16 @@ export class AlertsService {
   }
 
   async findAll(query: ListAlertsQueryDto): Promise<PaginatedAlerts> {
+    const q = query.q?.trim();
     const where: Prisma.AlertWhereInput = {
       ...(query.status !== undefined && { status: query.status }),
       ...(query.severity !== undefined && { severity: query.severity }),
+      ...(q && {
+        OR: [
+          { source: { contains: q, mode: 'insensitive' } },
+          { summary: { contains: q, mode: 'insensitive' } },
+        ],
+      }),
     };
 
     const [data, total] = await Promise.all([
