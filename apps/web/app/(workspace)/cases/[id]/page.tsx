@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { verifySession } from "@/features/auth/dal";
 import { getCase, listCaseTimelineEntries } from "@/features/cases/service";
 import { listUsers } from "@/features/users/service";
@@ -71,7 +72,12 @@ export default async function CaseDetailPage({
   return (
     <div className="space-y-8">
       <div className="space-y-2">
-        <h1 className="text-xl font-semibold">{kase.title}</h1>
+        <div className="flex items-center justify-between gap-4">
+          <h1 className="text-xl font-semibold">{kase.title}</h1>
+          <Link href={`/cases/${kase.id}/export`} className="text-sm underline">
+            Export as Markdown
+          </Link>
+        </div>
         <dl className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
           <div>
             <dt className="text-black/60 dark:text-white/60">Status</dt>

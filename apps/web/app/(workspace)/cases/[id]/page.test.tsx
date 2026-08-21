@@ -353,4 +353,29 @@ describe("CaseDetailPage", () => {
     render(jsx);
     expect(screen.queryByLabelText(/^type$/i)).not.toBeInTheDocument();
   });
+
+  it("renders an export link, separate from the lifecycle Actions section", async () => {
+    (getCase as jest.Mock).mockResolvedValue(kase);
+    (listCaseTimelineEntries as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 100, offset: 0 });
+    (listHypotheses as jest.Mock).mockResolvedValue([]);
+    (listEvidence as jest.Mock).mockResolvedValue([]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    const exportLink = screen.getByRole("link", { name: /export/i });
+    expect(exportLink).toHaveAttribute("href", "/cases/c1/export");
+  });
+
+  it("renders the export link for a case in any lifecycle state, not just RESOLVED", async () => {
+    (getCase as jest.Mock).mockResolvedValue({ ...kase, status: "INVESTIGATING" });
+    (listCaseTimelineEntries as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 100, offset: 0 });
+    (listHypotheses as jest.Mock).mockResolvedValue([]);
+    (listEvidence as jest.Mock).mockResolvedValue([]);
+
+    const jsx = await CaseDetailPage({ params: Promise.resolve({ id: "c1" }) });
+    render(jsx);
+
+    expect(screen.getByRole("link", { name: /export/i })).toBeInTheDocument();
+  });
 });
