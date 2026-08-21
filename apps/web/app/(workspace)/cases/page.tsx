@@ -30,13 +30,14 @@ function firstValue(value: string | string[] | undefined): string | undefined {
 }
 
 function buildPageHref(
-  filters: { status?: CaseStatus; severity?: Severity; assigneeId?: string },
+  filters: { status?: CaseStatus; severity?: Severity; assigneeId?: string; q?: string },
   offset: number,
 ): string {
   const params = new URLSearchParams();
   if (filters.status !== undefined) params.set("status", filters.status);
   if (filters.severity !== undefined) params.set("severity", filters.severity);
   if (filters.assigneeId !== undefined) params.set("assigneeId", filters.assigneeId);
+  if (filters.q !== undefined) params.set("q", filters.q);
   params.set("offset", String(offset));
   return `/cases?${params.toString()}`;
 }
@@ -54,6 +55,10 @@ export default async function CasesPage({
   const assigneeId = firstValue(params.assigneeId);
   const offset = firstValue(params.offset);
 
+  const rawQ = firstValue(params.q);
+  const trimmedQ = rawQ?.trim();
+  const safeQ = trimmedQ && trimmedQ.length > 0 && trimmedQ.length <= 200 ? trimmedQ : undefined;
+
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const safeAssigneeId = assigneeId !== undefined && UUID_RE.test(assigneeId) ? assigneeId : undefined;
 
@@ -67,6 +72,7 @@ export default async function CasesPage({
     // Analyst and always scopes their list to themselves regardless
     // (apps/api/src/cases/cases.service.ts's findAll()).
     assigneeId: user.role === "lead" ? safeAssigneeId : undefined,
+    q: safeQ,
     limit: 25,
     offset: safeOffset,
   };
@@ -87,6 +93,17 @@ export default async function CasesPage({
       </div>
 
       <form method="GET" className="flex flex-wrap items-end gap-4">
+        <label className="space-y-1 text-sm">
+          <span className="block font-medium">Search</span>
+          <input
+            type="search"
+            name="q"
+            defaultValue={rawQ ?? ""}
+            maxLength={200}
+            placeholder="Title..."
+            className="rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent"
+          />
+        </label>
         <label className="space-y-1 text-sm">
           <span className="block font-medium">Status</span>
           <select name="status" defaultValue={status ?? ""} className="rounded-md border border-black/20 px-3 py-2 dark:border-white/20 dark:bg-transparent">

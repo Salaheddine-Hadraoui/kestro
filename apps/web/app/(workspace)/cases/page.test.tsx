@@ -128,6 +128,39 @@ describe("CasesPage", () => {
     );
   });
 
+  it("renders a search input", async () => {
+    (listCases as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    const jsx = await CasesPage({ searchParams: Promise.resolve({}) });
+    render(jsx);
+
+    expect(screen.getByLabelText(/search/i)).toBeInTheDocument();
+  });
+
+  it("passes a trimmed q through to listCases", async () => {
+    (listCases as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    await CasesPage({ searchParams: Promise.resolve({ q: "  vpn  " }) });
+
+    expect(listCases).toHaveBeenCalledWith(expect.objectContaining({ q: "vpn" }));
+  });
+
+  it("drops a whitespace-only q instead of sending it", async () => {
+    (listCases as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    await CasesPage({ searchParams: Promise.resolve({ q: "   " }) });
+
+    expect(listCases).toHaveBeenCalledWith(expect.objectContaining({ q: undefined }));
+  });
+
+  it("drops a q longer than 200 characters instead of sending it", async () => {
+    (listCases as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+
+    await CasesPage({ searchParams: Promise.resolve({ q: "a".repeat(201) }) });
+
+    expect(listCases).toHaveBeenCalledWith(expect.objectContaining({ q: undefined }));
+  });
+
   it("shows a Next link when more cases exist beyond the current page", async () => {
     (listCases as jest.Mock).mockResolvedValue({
       data: [makeCase()],

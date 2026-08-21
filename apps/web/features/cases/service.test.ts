@@ -149,4 +149,10 @@ describe("cases service", () => {
     await getCase("has space/slash");
     expect(apiFetch).toHaveBeenCalledWith("/cases/has%20space%2Fslash");
   });
+
+  it("includes q in the query string when provided", async () => {
+    (apiFetch as jest.Mock).mockResolvedValue({ data: [], total: 0, limit: 25, offset: 0 });
+    await listCases({ q: "vpn", limit: 25, offset: 0 });
+    expect(apiFetch).toHaveBeenCalledWith("/cases?q=vpn&limit=25&offset=0");
+  });
 });
